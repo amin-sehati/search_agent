@@ -13,7 +13,7 @@ class Config:
     TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
     FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-    
+
     # LangChain Configuration
     LANGCHAIN_API_KEY = os.getenv("LANGCHAIN_API_KEY")
     LANGCHAIN_TRACING_V2 = os.getenv("LANGCHAIN_TRACING_V2")
@@ -21,8 +21,8 @@ class Config:
 
     # Research Configuration
     MAX_SOURCES = 20
-    DEFAULT_MODEL = "gpt-4o-mini"
-    FALLBACK_MODEL = "gpt-4o"
+    DEFAULT_MODEL = "gpt-4.1-nano-2025-04-14"
+    FALLBACK_MODEL = "gpt-4.1-nano-2025-04-14"
 
     # Search Configuration
     SEARCH_TIMEOUT = 30  # seconds

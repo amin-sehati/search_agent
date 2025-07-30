@@ -528,7 +528,7 @@ class LangGraphResearcher:
         openai_api_key: str,
         tavily_api_key: str,
         firecrawl_api_key: str,
-        model: str = "gpt-4",
+        model: str = "gpt-4.1-nano-2025-04-14,
     ):
         self.llm = ChatOpenAI(api_key=openai_api_key, model=model, temperature=0.3)
 
@@ -628,7 +628,7 @@ async def main():
         openai_api_key=Config.OPENAI_API_KEY,
         tavily_api_key=Config.TAVILY_API_KEY,
         firecrawl_api_key=Config.FIRECRAWL_API_KEY,
-        model="gpt-4",
+        model="gpt-4.1-nano-2025-04-14,
     )
 
     # Conduct research using LangGraph
