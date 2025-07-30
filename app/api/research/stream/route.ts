@@ -9,9 +9,9 @@ export async function POST(request: NextRequest) {
       return new Response('Query is required', { status: 400 })
     }
 
-    // Forward the request to the Python API
-    const apiUrl = process.env.API_URL || 'http://localhost:8000'
-    const response = await fetch(`${apiUrl}/research/stream`, {
+    // Forward the request to the Python API (Vercel serverless function)
+    const apiUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'
+    const response = await fetch(`${apiUrl}/api/research/stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
