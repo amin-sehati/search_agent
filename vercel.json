@@ -1,14 +1,22 @@
 {
-    "builds": [
-      {
-        "src": "research_ui.py",
-        "use": "@vercel/python"
-      }
-    ],
-    "routes": [
-      {
-        "src": "/(.*)",
-        "dest": "research_ui.py"
-      }
-    ]
+  "functions": {
+    "api/main.py": {
+      "runtime": "python3.9"
+    }
+  },
+  "routes": [
+    {
+      "src": "/api/research/(.*)",
+      "dest": "/api/main.py"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/main.py"
+    }
+  ],
+  "env": {
+    "OPENAI_API_KEY": "@openai_api_key",
+    "TAVILY_API_KEY": "@tavily_api_key",
+    "FIRECRAWL_API_KEY": "@firecrawl_api_key"
   }
+}
