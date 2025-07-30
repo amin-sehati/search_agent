@@ -202,9 +202,9 @@ class PlannerAgent:
     async def plan_research(self, state: ResearchState) -> Dict[str, Any]:
         print("\n🎯 PLANNER AGENT: Breaking down research query...")
         print("=" * 60)
-        
+
         query = state["original_query"]
-        
+
         planning_prompt = f"""
         You are a research planner. Your task is to break down the following research query into 3-5 specific, focused questions that can be researched independently.
         
@@ -237,35 +237,43 @@ class PlannerAgent:
         
         Research Questions:
         """
-        
+
         response = await self.llm.ainvoke([HumanMessage(content=planning_prompt)])
-        
+
         try:
             questions = json.loads(response.content.strip())
             if not isinstance(questions, list):
                 questions = [query]  # Fallback
         except:
             questions = [query]  # Fallback
-        
+
         # Validate and improve questions to ensure they are standalone
-        validated_questions = await self._validate_standalone_questions(questions, query)
-        
+        validated_questions = await self._validate_standalone_questions(
+            questions, query
+        )
+
         print(f"✅ Generated {len(validated_questions)} standalone research questions:")
         for i, question in enumerate(validated_questions, 1):
             print(f"   {i}. {question}")
         print("=" * 60)
-        
+
         logger.info(f"Generated {len(questions)} research questions")
-        
+
         return {
             "research_questions": validated_questions,
-            "messages": [AIMessage(content=f"Research plan created with {len(validated_questions)} standalone questions.")],
-            "next_action": "execute_research"
+            "messages": [
+                AIMessage(
+                    content=f"Research plan created with {len(validated_questions)} standalone questions."
+                )
+            ],
+            "next_action": "execute_research",
         }
-    
-    async def _validate_standalone_questions(self, questions: List[str], original_query: str) -> List[str]:
+
+    async def _validate_standalone_questions(
+        self, questions: List[str], original_query: str
+    ) -> List[str]:
         """Validate and improve questions to ensure they are truly standalone"""
-        
+
         validation_prompt = f"""
         Original Query: {original_query}
         
@@ -286,7 +294,7 @@ class PlannerAgent:
         
         Validated Questions:
         """
-        
+
         try:
             response = await self.llm.ainvoke([HumanMessage(content=validation_prompt)])
             validated = json.loads(response.content.strip())
@@ -294,7 +302,7 @@ class PlannerAgent:
                 return validated
         except Exception as e:
             logger.warning(f"Question validation failed: {e}")
-        
+
         # Fallback: return original questions
         return questions
 
@@ -307,25 +315,29 @@ class TavilyExecutionAgent:
     async def execute_research(self, state: ResearchState) -> Dict[str, Any]:
         print("\n🔍 TAVILY AGENT: Executing research...")
         print("=" * 60)
-        
+
         questions = state["research_questions"]
         all_results = []
-        
+
         for i, question in enumerate(questions, 1):
-            print(f"   Searching question {i}: {question[:80]}{'...' if len(question) > 80 else ''}")
+            print(
+                f"   Searching question {i}: {question[:80]}{'...' if len(question) > 80 else ''}"
+            )
             results = await self.retriever.search(question, max_results=5)
             all_results.extend(results)
             print(f"   ✓ Found {len(results)} sources")
-        
+
         print(f"✅ Tavily research complete: {len(all_results)} total sources")
         print("=" * 60)
-        
+
         logger.info(f"Tavily agent completed research with {len(all_results)} sources")
-        
+
         # Return only the specific updates this agent is responsible for
         return {
             "tavily_results": all_results,
-            "messages": [AIMessage(content=f"Tavily agent found {len(all_results)} sources.")]
+            "messages": [
+                AIMessage(content=f"Tavily agent found {len(all_results)} sources.")
+            ],
         }
 
 
@@ -337,25 +349,31 @@ class FirecrawlExecutionAgent:
     async def execute_research(self, state: ResearchState) -> Dict[str, Any]:
         print("\n🕷️  FIRECRAWL AGENT: Executing research...")
         print("=" * 60)
-        
+
         questions = state["research_questions"]
         all_results = []
-        
+
         for i, question in enumerate(questions, 1):
-            print(f"   Searching question {i}: {question[:80]}{'...' if len(question) > 80 else ''}")
+            print(
+                f"   Searching question {i}: {question[:80]}{'...' if len(question) > 80 else ''}"
+            )
             results = await self.retriever.search(question, max_results=5)
             all_results.extend(results)
             print(f"   ✓ Found {len(results)} sources")
-        
+
         print(f"✅ Firecrawl research complete: {len(all_results)} total sources")
         print("=" * 60)
-        
-        logger.info(f"Firecrawl agent completed research with {len(all_results)} sources")
-        
+
+        logger.info(
+            f"Firecrawl agent completed research with {len(all_results)} sources"
+        )
+
         # Return only the specific updates this agent is responsible for
         return {
             "firecrawl_results": all_results,
-            "messages": [AIMessage(content=f"Firecrawl agent found {len(all_results)} sources.")]
+            "messages": [
+                AIMessage(content=f"Firecrawl agent found {len(all_results)} sources.")
+            ],
         }
 
 
@@ -377,42 +395,46 @@ class ResearchAnalyzer:
     async def analyze_and_synthesize(self, state: ResearchState) -> Dict[str, Any]:
         print("\n🧠 ANALYZER: Synthesizing research results...")
         print("=" * 60)
-        
+
         tavily_results = state.get("tavily_results", [])
         firecrawl_results = state.get("firecrawl_results", [])
-        
+
         print(f"   📊 Processing {len(tavily_results)} Tavily sources")
         print(f"   📊 Processing {len(firecrawl_results)} Firecrawl sources")
-        
+
         # Combine and deduplicate sources
         all_sources = tavily_results + firecrawl_results
         unique_sources = self._deduplicate_sources(all_sources)
         sorted_sources = sorted(unique_sources, key=lambda x: x.score, reverse=True)
-        
+
         final_sources = sorted_sources[:20]  # Limit to top 20
-        
+
         print(f"   🔄 Deduplicated to {len(final_sources)} unique sources")
         print("   📝 Generating summary...")
-        
+
         # Generate summary
         summary = await self._generate_summary(state["original_query"], final_sources)
-        
+
         print("   📄 Generating final report...")
-        
+
         # Generate report
-        report = await self._generate_report(state["original_query"], final_sources, summary)
-        
+        report = await self._generate_report(
+            state["original_query"], final_sources, summary
+        )
+
         print("✅ Analysis and synthesis complete!")
         print("=" * 60)
-        
+
         logger.info(f"Analysis completed with {len(final_sources)} final sources")
-        
+
         return {
             "all_sources": final_sources,
             "summary": summary,
             "report": report,
-            "messages": [AIMessage(content="Research analysis and synthesis completed.")],
-            "next_action": "complete"
+            "messages": [
+                AIMessage(content="Research analysis and synthesis completed.")
+            ],
+            "next_action": "complete",
         }
 
     async def _generate_summary(self, query: str, sources: List[SearchResult]) -> str:
@@ -427,7 +449,7 @@ class ResearchAnalyzer:
         combined_content = "".join(content_chunks)
 
         prompt = f"""
-        Based on the following research sources about "{query}", provide a comprehensive summary of the key findings:
+        Based on the following research sources about "{query}", provide a summary of the key findings:
 
         {combined_content}
 
@@ -447,7 +469,9 @@ class ResearchAnalyzer:
             logger.error(f"Error generating summary: {e}")
             return "Error generating summary of research findings."
 
-    async def _generate_report(self, query: str, sources: List[SearchResult], summary: str) -> str:
+    async def _generate_report(
+        self, query: str, sources: List[SearchResult], summary: str
+    ) -> str:
         if not sources:
             return "No research data available to generate report."
 
@@ -507,36 +531,38 @@ class LangGraphResearcher:
         model: str = "gpt-4",
     ):
         self.llm = ChatOpenAI(api_key=openai_api_key, model=model, temperature=0.3)
-        
+
         # Initialize retrievers
         self.tavily_retriever = TavilyRetriever(tavily_api_key)
         self.firecrawl_retriever = FirecrawlRetriever(firecrawl_api_key)
-        
+
         # Initialize agents
         self.planner = PlannerAgent(self.llm)
         self.tavily_agent = TavilyExecutionAgent(self.tavily_retriever, self.llm)
-        self.firecrawl_agent = FirecrawlExecutionAgent(self.firecrawl_retriever, self.llm)
+        self.firecrawl_agent = FirecrawlExecutionAgent(
+            self.firecrawl_retriever, self.llm
+        )
         self.analyzer = ResearchAnalyzer(self.llm)
-        
+
         # Build the graph
         self.workflow = self._build_workflow()
 
     def _build_workflow(self) -> StateGraph:
         workflow = StateGraph(ResearchState)
-        
+
         # Add nodes
         workflow.add_node("planner", self.planner.plan_research)
         workflow.add_node("tavily_executor", self.tavily_agent.execute_research)
         workflow.add_node("firecrawl_executor", self.firecrawl_agent.execute_research)
         workflow.add_node("analyzer", self.analyzer.analyze_and_synthesize)
-        
+
         # Define the flow
         workflow.set_entry_point("planner")
         workflow.add_edge("planner", "tavily_executor")
         workflow.add_edge("planner", "firecrawl_executor")
         workflow.add_edge(["tavily_executor", "firecrawl_executor"], "analyzer")
         workflow.add_edge("analyzer", END)
-        
+
         return workflow.compile()
 
     async def conduct_research(self, query: str) -> Dict[str, Any]:
@@ -546,9 +572,9 @@ class LangGraphResearcher:
         print(f"📋 Query: {query}")
         print("🏗️  Workflow: Planner → [Tavily & Firecrawl] → Analyzer")
         print("=" * 80)
-        
+
         logger.info(f"Starting LangGraph research for query: {query}")
-        
+
         initial_state: ResearchState = {
             "messages": [HumanMessage(content=f"Research query: {query}")],
             "original_query": query,
@@ -558,15 +584,15 @@ class LangGraphResearcher:
             "all_sources": [],
             "summary": "",
             "report": "",
-            "next_action": "plan"
+            "next_action": "plan",
         }
-        
+
         final_state = await self.workflow.ainvoke(initial_state)
-        
+
         print("\n" + "=" * 80)
         print("🎉 LANGGRAPH RESEARCH WORKFLOW COMPLETED")
         print("=" * 80)
-        
+
         logger.info("LangGraph research completed")
         return final_state
 
@@ -578,14 +604,13 @@ class LangGraphResearcher:
             "summary": state["summary"],
             "report": state["report"],
             "sources": [asdict(source) for source in state["all_sources"]],
-            "total_sources": len(state["all_sources"])
+            "total_sources": len(state["all_sources"]),
         }
 
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(research_data, f, indent=2, ensure_ascii=False)
 
         logger.info(f"Research saved to {filename}")
-
 
 
 async def main():
@@ -603,7 +628,7 @@ async def main():
         openai_api_key=Config.OPENAI_API_KEY,
         tavily_api_key=Config.TAVILY_API_KEY,
         firecrawl_api_key=Config.FIRECRAWL_API_KEY,
-        model="gpt-4"
+        model="gpt-4",
     )
 
     # Conduct research using LangGraph
@@ -616,17 +641,17 @@ async def main():
     print("=" * 80)
     for i, question in enumerate(final_state["research_questions"], 1):
         print(f"{i}. {question}")
-    
+
     print("\n" + "=" * 80)
     print("RESEARCH SUMMARY")
     print("=" * 80)
     print(final_state["summary"])
-    
+
     print("\n" + "=" * 80)
     print("FULL REPORT")
     print("=" * 80)
     print(final_state["report"])
-    
+
     print("\n" + "=" * 80)
     print("SOURCES FOUND")
     print("=" * 80)

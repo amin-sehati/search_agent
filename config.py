@@ -16,8 +16,8 @@ class Config:
 
     # Research Configuration
     MAX_SOURCES = 20
-    DEFAULT_MODEL = "gpt-4"
-    FALLBACK_MODEL = "gpt-3.5-turbo"
+    DEFAULT_MODEL = "gpt-4o-mini"
+    FALLBACK_MODEL = "gpt-4o"
 
     # Search Configuration
     SEARCH_TIMEOUT = 30  # seconds
