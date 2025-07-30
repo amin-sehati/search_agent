@@ -161,7 +161,7 @@ class handler(BaseHTTPRequestHandler):
                 openai_api_key=Config.OPENAI_API_KEY,
                 tavily_api_key=Config.TAVILY_API_KEY,
                 firecrawl_api_key=Config.FIRECRAWL_API_KEY,
-                model="gpt-4.1-nano-2025-04-14",
+                model="gpt-4o",
                 progress_handler=progress_handler,
             )
 
