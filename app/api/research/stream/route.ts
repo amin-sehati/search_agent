@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
     console.error('Stream API error:', error)
     
     // Handle timeout specifically
-    if (error.name === 'AbortError') {
+    if (error instanceof Error && error.name === 'AbortError') {
       return new Response(
         JSON.stringify({ error: 'Request timeout - research is taking too long' }),
         { 
