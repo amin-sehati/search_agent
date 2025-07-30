@@ -11,13 +11,21 @@ export async function POST(request: NextRequest) {
 
     // Forward the request to the Python API (Vercel serverless function)
     const apiUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'
+    
+    // Add timeout controller
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 290000) // 4 min 50 sec timeout
+    
     const response = await fetch(`${apiUrl}/api/research/stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ query }),
+      signal: controller.signal,
     })
+    
+    clearTimeout(timeoutId)
 
     if (!response.ok) {
       throw new Error(`API request failed: ${response.status}`)
@@ -61,6 +69,18 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('Stream API error:', error)
+    
+    // Handle timeout specifically
+    if (error.name === 'AbortError') {
+      return new Response(
+        JSON.stringify({ error: 'Request timeout - research is taking too long' }),
+        { 
+          status: 408,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      )
+    }
+    
     return new Response(
       JSON.stringify({ error: 'Internal server error' }),
       { 

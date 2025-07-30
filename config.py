@@ -13,6 +13,11 @@ class Config:
     TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
     FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    
+    # LangChain Configuration
+    LANGCHAIN_API_KEY = os.getenv("LANGCHAIN_API_KEY")
+    LANGCHAIN_TRACING_V2 = os.getenv("LANGCHAIN_TRACING_V2")
+    LANGCHAIN_PROJECT = os.getenv("LANGCHAIN_PROJECT")
 
     # Research Configuration
     MAX_SOURCES = 20
@@ -54,6 +59,10 @@ class Config:
 
         if not cls.OPENAI_API_KEY:
             issues.append("OpenAI API key not configured")
+
+        # LangChain keys are optional for tracing
+        if cls.LANGCHAIN_TRACING_V2 == "true" and not cls.LANGCHAIN_API_KEY:
+            issues.append("LangChain API key required when tracing is enabled")
 
         return {"valid": len(issues) == 0, "issues": issues}
 
