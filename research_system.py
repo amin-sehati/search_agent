@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Any, Optional, Union, Annotated, TypedDict
@@ -101,36 +102,77 @@ class TavilyRetriever(BaseRetriever):
         if self.circuit_open:
             logger.warning("Tavily circuit breaker is open, skipping search")
             return []
+        
+        # Validate API key
+        if not self.api_key or self.api_key.strip() == "":
+            logger.error("Tavily API key is empty or not configured")
+            self._handle_failure()
+            return []
             
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (compatible; ResearchBot/1.0)"
+        }
+        
+        # Use minimal payload confirmed to work
         payload = {
             "api_key": self.api_key,
             "query": query,
-            "search_depth": "basic",  # Changed from "advanced" for faster response
-            "include_answer": False,   # Disabled for faster response
-            "include_raw_content": False,  # Disabled for faster response
-            "max_results": min(max_results, 5),  # Limit results
-            "include_domains": [],
-            "exclude_domains": [],
+            "max_results": min(max_results, 5),
         }
+        
+        # Log for debugging in Vercel (mask API key)
+        debug_payload = payload.copy()
+        if self.api_key:
+            debug_payload["api_key"] = f"{self.api_key[:8]}..." if len(self.api_key) > 8 else "****"
+        logger.info(f"Tavily API request to {self.base_url}/search with payload: {debug_payload}")
+        logger.info(f"Tavily API key length: {len(self.api_key) if self.api_key else 0}")
 
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
-                async with session.post(
-                    f"{self.base_url}/search", headers=headers, json=payload
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        self.failure_count = 0  # Reset on success
-                        return self._format_tavily_results(data)
-                    else:
-                        logger.error(f"Tavily search failed: {response.status}")
-                        self._handle_failure()
-                        return []
-        except Exception as e:
-            logger.error(f"Tavily search error: {e}")
-            self._handle_failure()
-            return []
+        # For Vercel debugging: log the exact environment
+        logger.info(f"Running in Vercel: {os.environ.get('VERCEL', 'false')}")
+        logger.info(f"API base URL: {self.base_url}")
+        
+        # Try multiple approaches for better Vercel compatibility
+        attempts = [
+            # Attempt 1: Minimal payload (most likely to work in Vercel)
+            payload,
+            # Attempt 2: Add search_depth for robustness
+            {**payload, "search_depth": "basic"},
+        ]
+        
+        for attempt_num, attempt_payload in enumerate(attempts, 1):
+            try:
+                logger.info(f"Tavily API attempt {attempt_num}/{len(attempts)}")
+                
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+                    async with session.post(
+                        f"{self.base_url}/search", headers=headers, json=attempt_payload
+                    ) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            self.failure_count = 0  # Reset on success
+                            logger.info(f"Tavily API success on attempt {attempt_num}")
+                            return self._format_tavily_results(data)
+                        else:
+                            # Get detailed error information
+                            try:
+                                error_data = await response.text()
+                                logger.warning(f"Tavily attempt {attempt_num} failed: {response.status} - {error_data}")
+                            except:
+                                logger.warning(f"Tavily attempt {attempt_num} failed: {response.status}")
+                            
+                            # Don't handle as failure yet, try next attempt
+                            if attempt_num == len(attempts):
+                                self._handle_failure()
+                                return []
+                                
+            except Exception as e:
+                logger.warning(f"Tavily attempt {attempt_num} error: {e}")
+                if attempt_num == len(attempts):
+                    self._handle_failure()
+                    return []
+        
+        return []
     
     def _handle_failure(self):
         """Handle API failures and circuit breaker logic"""
@@ -395,6 +437,11 @@ class TavilyCompanyDiscoveryAgent:
         print(f"   Searching for companies: {company_query}")
         results = await self.retriever.search(company_query, max_results=10)
         print(f"   ✓ Found {len(results)} company sources")
+
+        # If Tavily fails completely, create a fallback message but don't fail the whole workflow
+        if len(results) == 0:
+            logger.warning("Tavily returned no results - this may indicate API issues")
+            print("   ⚠️  Tavily API may be experiencing issues, continuing with Firecrawl only")
 
         print(f"✅ Tavily company discovery complete: {len(results)} sources")
         print("=" * 60)

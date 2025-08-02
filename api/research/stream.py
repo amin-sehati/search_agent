@@ -122,9 +122,17 @@ class handler(BaseHTTPRequestHandler):
 
     async def stream_research(self, query: str):
         try:
+            # Add detailed logging for Vercel debugging
+            logger.info("=== VERCEL ENVIRONMENT DEBUG ===")
+            logger.info(f"TAVILY_API_KEY present: {bool(os.getenv('TAVILY_API_KEY'))}")
+            logger.info(f"TAVILY_API_KEY length: {len(os.getenv('TAVILY_API_KEY', ''))}")
+            logger.info(f"FIRECRAWL_API_KEY present: {bool(os.getenv('FIRECRAWL_API_KEY'))}")
+            logger.info(f"OPENAI_API_KEY present: {bool(os.getenv('OPENAI_API_KEY'))}")
+            
             config_status = Config.validate_config()
             if not config_status["valid"]:
                 error_msg = f"Configuration error: {config_status['issues']}"
+                logger.error(f"Config validation failed: {error_msg}")
                 self.wfile.write(
                     f"data: {json.dumps({'error': error_msg, 'type': 'error'})}\n\n".encode()
                 )

@@ -2,17 +2,29 @@ import os
 from typing import Dict, Any
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load environment variables from .env file (local development)
 load_dotenv()
+
+# For Vercel deployment, ensure environment variables are available
+# Vercel doesn't use .env files, so we need to check os.environ directly
 
 
 class Config:
     """Configuration class for the research system"""
 
-    # API Keys - Set these as environment variables or modify directly
-    TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
-    FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY")
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    # API Keys - Multiple fallback methods for Vercel compatibility
+    @classmethod
+    def _get_env_var(cls, var_name: str) -> str:
+        """Get environment variable with multiple fallback methods for Vercel"""
+        return (
+            os.environ.get(var_name) or 
+            os.getenv(var_name) or 
+            ""
+        )
+    
+    TAVILY_API_KEY = _get_env_var.__func__(None, "TAVILY_API_KEY")
+    FIRECRAWL_API_KEY = _get_env_var.__func__(None, "FIRECRAWL_API_KEY") 
+    OPENAI_API_KEY = _get_env_var.__func__(None, "OPENAI_API_KEY")
 
     # LangChain Configuration
     LANGCHAIN_API_KEY = os.getenv("LANGCHAIN_API_KEY")
@@ -51,14 +63,25 @@ class Config:
         """Validate configuration and return status"""
         issues = []
 
+        # Check each API key with more detailed logging
         if not cls.TAVILY_API_KEY:
             issues.append("Tavily API key not configured")
+        else:
+            # Mask the key for logging
+            masked_key = f"{cls.TAVILY_API_KEY[:8]}..." if len(cls.TAVILY_API_KEY) > 8 else "****"
+            print(f"Tavily API key found: {masked_key}")
 
         if not cls.FIRECRAWL_API_KEY:
             issues.append("Firecrawl API key not configured")
+        else:
+            masked_key = f"{cls.FIRECRAWL_API_KEY[:8]}..." if len(cls.FIRECRAWL_API_KEY) > 8 else "****"
+            print(f"Firecrawl API key found: {masked_key}")
 
         if not cls.OPENAI_API_KEY:
             issues.append("OpenAI API key not configured")
+        else:
+            masked_key = f"{cls.OPENAI_API_KEY[:8]}..." if len(cls.OPENAI_API_KEY) > 8 else "****"
+            print(f"OpenAI API key found: {masked_key}")
 
         # LangChain keys are optional for tracing
         if cls.LANGCHAIN_TRACING_V2 == "true" and not cls.LANGCHAIN_API_KEY:
