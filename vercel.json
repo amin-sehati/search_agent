@@ -1,10 +1,10 @@
 {
   "functions": {
     "api/research/stream.py": {
-      "maxDuration": 3000
+      "maxDuration": 900
     },
     "app/api/research/stream/route.ts": {
-      "maxDuration": 3000
+      "maxDuration": 900
     }
   }
 }
