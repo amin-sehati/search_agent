@@ -78,6 +78,9 @@ export async function POST(request: NextRequest) {
                     market_topic: extractMarketTopic(query),
                     companies: generateMockCompanies(query),
                     total_companies: 5,
+                    tavily_source_count: 3,
+                    firecrawl_source_count: 7,
+                    total_sources: 8,
                     timestamp: new Date().toISOString(),
                     awaiting_user_input: true,
                     step: 'company_review'

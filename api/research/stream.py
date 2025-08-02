@@ -184,6 +184,9 @@ class handler(BaseHTTPRequestHandler):
                 "market_topic": discovery_result["market_topic"],
                 "companies": serialized_companies,
                 "total_companies": len(serialized_companies),
+                "tavily_source_count": discovery_result.get("tavily_source_count", 0),
+                "firecrawl_source_count": discovery_result.get("firecrawl_source_count", 0),
+                "total_sources": discovery_result.get("total_sources", 0),
                 "timestamp": datetime.now().isoformat(),
                 "awaiting_user_input": True,
                 "step": "company_review"

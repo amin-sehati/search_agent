@@ -26,6 +26,9 @@ interface CompanyDiscoveryResult {
   market_topic: string
   companies: Company[]
   total_companies: number
+  tavily_source_count: number
+  firecrawl_source_count: number
+  total_sources: number
   timestamp: string
   awaiting_user_input: boolean
   step: string
@@ -390,9 +393,25 @@ export default function Home() {
       {/* Company Discovery Results */}
       {companyDiscovery && !companyResult && (
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 text-black">
-            🏢 Companies Found in {companyDiscovery.market_topic}
-          </h2>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+            <h2 className="text-xl font-semibold flex items-center gap-2 text-black">
+              🏢 Companies Found in {companyDiscovery.market_topic}
+            </h2>
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <div className="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded-full">
+                <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
+                <span className="text-blue-700 font-medium">Tavily: {companyDiscovery.tavily_source_count}</span>
+              </div>
+              <div className="flex items-center gap-2 bg-green-50 px-3 py-1 rounded-full">
+                <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                <span className="text-green-700 font-medium">Firecrawl: {companyDiscovery.firecrawl_source_count}</span>
+              </div>
+              <div className="flex items-center gap-2 bg-gray-50 px-3 py-1 rounded-full">
+                <span className="w-2 h-2 bg-gray-500 rounded-full"></span>
+                <span className="text-gray-700 font-medium">Total: {companyDiscovery.total_sources}</span>
+              </div>
+            </div>
+          </div>
           
           <div className="space-y-4 mb-6">
             {companies.map((company, index) => (
