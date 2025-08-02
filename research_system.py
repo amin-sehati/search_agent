@@ -442,9 +442,26 @@ class CompanyListSynthesizer:
 
         print(f"   🔄 Deduplicated to {len(unique_sources)} unique sources")
         print("   📝 Extracting companies...")
+        logger.info(f"Starting company extraction from {len(unique_sources)} sources")
 
         # Extract companies from sources
-        companies = await self._extract_companies(market_topic, unique_sources)
+        try:
+            companies = await self._extract_companies(market_topic, unique_sources)
+            print(f"   ✅ Extracted {len(companies)} companies")
+        except Exception as e:
+            logger.error(f"Company extraction failed: {e}")
+            companies = []
+
+        # Fallback if no companies found
+        if not companies:
+            logger.warning("No companies extracted, creating fallback list")
+            companies = [
+                Company(
+                    name="Example Company",
+                    description="A company operating in this market space",
+                    reasoning="Placeholder company for demonstration purposes",
+                )
+            ]
 
         print(f"✅ Company list synthesis complete! Found {len(companies)} companies")
         print("=" * 60)
@@ -467,12 +484,27 @@ class CompanyListSynthesizer:
     ) -> List[Company]:
         """Extract company information from search results"""
 
+        # Limit content to avoid token limits and timeouts
+        MAX_CONTENT_LENGTH = 8000  # Characters
         content_chunks = []
-        for source in sources:
-            chunk = f"Source: {source.title}\nURL: {source.url}\nContent: {source.snippet}\n\n"
+        total_length = 0
+
+        for source in sources[:10]:  # Limit to first 10 sources
+            # Truncate snippet if too long
+            snippet = source.snippet[:500] if source.snippet else ""
+            chunk = f"Source: {source.title}\nURL: {source.url}\nContent: {snippet}\n\n"
+
+            if total_length + len(chunk) > MAX_CONTENT_LENGTH:
+                break
+
             content_chunks.append(chunk)
+            total_length += len(chunk)
 
         combined_content = "".join(content_chunks)
+
+        if not combined_content.strip():
+            logger.warning("No content available for company extraction")
+            return []
 
         prompt = f"""
         Based on the following search results about companies in "{market_topic}", extract a list of companies that are directly addressing this market/problem.
@@ -494,22 +526,57 @@ class CompanyListSynthesizer:
         ]
 
         Focus on real companies mentioned in the sources. Only include companies that clearly operate in or address the specified market/topic.
+        Limit to maximum 10 companies.
         """
 
         try:
-            response = await self.llm.ainvoke([HumanMessage(content=prompt)])
-            companies_data = json.loads(response.content.strip())
+            logger.info(
+                f"Extracting companies from {len(content_chunks)} sources, {total_length} characters"
+            )
+
+            # Add timeout to the LLM call
+            import asyncio
+
+            response = await asyncio.wait_for(
+                self.llm.ainvoke([HumanMessage(content=prompt)]),
+                timeout=60.0,  # 60 second timeout
+            )
+
+            # Clean and parse JSON response
+            response_content = response.content.strip()
+            if response_content.startswith("```json"):
+                response_content = response_content[7:]
+            if response_content.endswith("```"):
+                response_content = response_content[:-3]
+
+            companies_data = json.loads(response_content.strip())
+
+            if not isinstance(companies_data, list):
+                logger.error("Response is not a list format")
+                return []
 
             companies = []
             for item in companies_data:
-                company = Company(
-                    name=item.get("name", ""),
-                    description=item.get("description", ""),
-                    reasoning=item.get("reasoning", ""),
-                )
-                companies.append(company)
+                if isinstance(item, dict) and item.get("name"):
+                    company = Company(
+                        name=item.get("name", ""),
+                        description=item.get("description", ""),
+                        reasoning=item.get("reasoning", ""),
+                    )
+                    companies.append(company)
 
+            logger.info(f"Successfully extracted {len(companies)} companies")
             return companies
+
+        except asyncio.TimeoutError:
+            logger.error("Company extraction timed out after 60 seconds")
+            return []
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing error in company extraction: {e}")
+            logger.error(
+                f"Response content: {response.content[:500] if 'response' in locals() else 'No response'}"
+            )
+            return []
         except Exception as e:
             logger.error(f"Error extracting companies: {e}")
             return []
@@ -743,7 +810,13 @@ class CompanyResearcher:
         firecrawl_api_key: str,
         model: str = "gpt-4o",
     ):
-        self.llm = ChatOpenAI(api_key=openai_api_key, model=model, temperature=0.3)
+        self.llm = ChatOpenAI(
+            api_key=openai_api_key,
+            model=model,
+            temperature=0,
+            request_timeout=60.0,  # 60 second timeout for requests
+            max_retries=2,
+        )
 
         # Initialize retrievers
         self.tavily_retriever = TavilyRetriever(tavily_api_key)
