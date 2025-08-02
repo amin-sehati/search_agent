@@ -53,23 +53,6 @@ class CustomStreamingCompanyResearcher(CompanyResearcher):
         super().__init__(*args, **kwargs)
         self.progress_handler = progress_handler
 
-    async def conduct_company_research_streaming(self, query: str):
-        if self.progress_handler:
-            self.progress_handler.update_progress(
-                "User Input", "🎯 Processing market/topic query...", 1
-            )
-
-        # Run the initial discovery workflow
-        discovery_state = await self.conduct_company_research(query)
-
-        if self.progress_handler:
-            self.progress_handler.update_progress(
-                "Company Discovery", "✅ Company list created", 2
-            )
-
-        # Return the discovery state for user review
-        return discovery_state
-
     async def continue_company_research_streaming(self, state, user_companies=None):
         if self.progress_handler:
             self.progress_handler.update_progress(
@@ -95,12 +78,14 @@ class handler(BaseHTTPRequestHandler):
             post_data = self.rfile.read(content_length)
             request_data = json.loads(post_data.decode("utf-8"))
 
-            query = request_data.get("query")
-            if not query:
+            state = request_data.get("state")
+            user_companies_data = request_data.get("user_companies", [])
+            
+            if not state:
                 self.send_response(400)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(json.dumps({"error": "Query is required"}).encode())
+                self.wfile.write(json.dumps({"error": "State is required"}).encode())
                 return
 
             # Set up streaming response
@@ -110,8 +95,22 @@ class handler(BaseHTTPRequestHandler):
             self.send_header("Connection", "keep-alive")
             self.end_headers()
 
-            # Run async research
-            asyncio.run(self.stream_research(query))
+            # Convert user companies data back to Company objects
+            user_companies = []
+            for company_data in user_companies_data:
+                company = Company(
+                    name=company_data.get("name", ""),
+                    description=company_data.get("description", ""),
+                    reasoning=company_data.get("reasoning", ""),
+                    year_established=company_data.get("year_established"),
+                    still_in_business=company_data.get("still_in_business"),
+                    history=company_data.get("history", ""),
+                    future_roadmap=company_data.get("future_roadmap", "")
+                )
+                user_companies.append(company)
+
+            # Run async company info gathering
+            asyncio.run(self.stream_company_info(state, user_companies))
 
         except Exception as e:
             logger.error(f"Handler error: {e}")
@@ -120,7 +119,7 @@ class handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"error": str(e)}).encode())
 
-    async def stream_research(self, query: str):
+    async def stream_company_info(self, state, user_companies):
         try:
             config_status = Config.validate_config()
             if not config_status["valid"]:
@@ -141,12 +140,14 @@ class handler(BaseHTTPRequestHandler):
                 progress_handler=progress_handler,
             )
 
-            # Start company discovery in background
-            discovery_task = asyncio.create_task(researcher.conduct_company_research_streaming(query))
+            # Start company info gathering in background
+            info_task = asyncio.create_task(
+                researcher.continue_company_research_streaming(state, user_companies)
+            )
 
-            # Stream progress updates for discovery phase
+            # Stream progress updates
             last_event_count = 0
-            while not discovery_task.done():
+            while not info_task.done():
                 current_event_count = len(progress_event.events)
                 if current_event_count > last_event_count:
                     for event in progress_event.events[last_event_count:]:
@@ -158,8 +159,8 @@ class handler(BaseHTTPRequestHandler):
 
                 await asyncio.sleep(0.5)
 
-            # Get discovery result
-            discovery_result = await discovery_task
+            # Get final result
+            final_result = await info_task
 
             # Send any remaining progress events
             current_event_count = len(progress_event.events)
@@ -170,32 +171,22 @@ class handler(BaseHTTPRequestHandler):
                     )
                     self.wfile.flush()
 
-            # Serialize companies for frontend
-            serialized_companies = []
-            for company in discovery_result.get("companies_list", []):
-                if hasattr(company, "__dict__"):
-                    serialized_companies.append(company.__dict__)
-                else:
-                    serialized_companies.append(company)
-
-            # Send company discovery result for user review
-            discovery_data = {
-                "query": discovery_result["original_query"],
-                "market_topic": discovery_result["market_topic"],
-                "companies": serialized_companies,
-                "total_companies": len(serialized_companies),
+            # Send final result with company pages
+            final_data = {
+                "query": final_result["original_query"],
+                "market_topic": final_result["market_topic"],
+                "company_pages": final_result.get("final_company_pages", {}),
+                "total_companies": len(final_result.get("final_company_pages", {})),
                 "timestamp": datetime.now().isoformat(),
-                "awaiting_user_input": True,
-                "step": "company_review"
             }
 
             self.wfile.write(
-                f"data: {json.dumps({'type': 'company_discovery', 'data': discovery_data})}\n\n".encode()
+                f"data: {json.dumps({'type': 'complete', 'data': final_data})}\n\n".encode()
             )
             self.wfile.flush()
 
         except Exception as e:
-            logger.error(f"Streaming research error: {e}")
+            logger.error(f"Streaming company info error: {e}")
             self.wfile.write(
                 f"data: {json.dumps({'error': str(e), 'type': 'error'})}\n\n".encode()
             )

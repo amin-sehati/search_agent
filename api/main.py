@@ -12,7 +12,7 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from research_system import LangGraphResearcher
+from research_system import CompanyResearcher
 from config import Config
 
 app = FastAPI(title="AI Research Assistant API")
@@ -62,7 +62,7 @@ class StreamingProgressHandler:
         self.progress_event.add_event(step_name, message, step_number)
 
 
-class CustomStreamingResearcher(LangGraphResearcher):
+class CustomStreamingResearcher(CompanyResearcher):
     def __init__(self, *args, progress_handler=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.progress_handler = progress_handler
@@ -70,59 +70,18 @@ class CustomStreamingResearcher(LangGraphResearcher):
     async def conduct_research(self, query: str):
         if self.progress_handler:
             self.progress_handler.update_progress(
-                "Planning", "🎯 Breaking down research query...", 1
+                "User Input", "🎯 Processing market/topic query...", 1
             )
 
-        initial_state = {
-            "messages": [],
-            "original_query": query,
-            "research_questions": [],
-            "tavily_results": [],
-            "firecrawl_results": [],
-            "all_sources": [],
-            "summary": "",
-            "report": "",
-            "next_action": "plan",
-        }
-
-        state_after_planning = await self.planner.plan_research(initial_state)
-        initial_state.update(state_after_planning)
+        # Run company discovery
+        result = await self.conduct_company_research(query)
 
         if self.progress_handler:
             self.progress_handler.update_progress(
-                "Planning", "✅ Research questions generated", 1
+                "Complete", "✅ Company discovery completed!", 2
             )
 
-        if self.progress_handler:
-            self.progress_handler.update_progress(
-                "Research", "🔍 Executing Tavily search...", 2
-            )
-
-        tavily_results = await self.tavily_agent.execute_research(initial_state)
-        initial_state.update(tavily_results)
-
-        if self.progress_handler:
-            self.progress_handler.update_progress(
-                "Research", "🕷️ Executing Firecrawl search...", 2
-            )
-
-        firecrawl_results = await self.firecrawl_agent.execute_research(initial_state)
-        initial_state.update(firecrawl_results)
-
-        if self.progress_handler:
-            self.progress_handler.update_progress(
-                "Analysis", "🧠 Analyzing and synthesizing results...", 3
-            )
-
-        final_results = await self.analyzer.analyze_and_synthesize(initial_state)
-        initial_state.update(final_results)
-
-        if self.progress_handler:
-            self.progress_handler.update_progress(
-                "Complete", "🎉 Research workflow completed!", 4
-            )
-
-        return initial_state
+        return result
 
 
 @app.get("/health")
@@ -153,30 +112,28 @@ async def start_research(request: ResearchRequest):
                 detail=f"Configuration error: {config_status['issues']}",
             )
 
-        researcher = LangGraphResearcher(
+        researcher = CompanyResearcher(
             openai_api_key=Config.OPENAI_API_KEY,
             tavily_api_key=Config.TAVILY_API_KEY,
             firecrawl_api_key=Config.FIRECRAWL_API_KEY,
             model="gpt-4o",
         )
 
-        result = await researcher.conduct_research(request.query)
+        result = await researcher.conduct_company_research(request.query)
 
-        # Convert SearchResult objects to dictionaries for JSON serialization
-        serialized_sources = []
-        for source in result.get("all_sources", []):
-            if hasattr(source, "__dict__"):
-                serialized_sources.append(source.__dict__)
+        # Convert Company objects to dictionaries for JSON serialization
+        serialized_companies = []
+        for company in result.get("companies_list", []):
+            if hasattr(company, "__dict__"):
+                serialized_companies.append(company.__dict__)
             else:
-                serialized_sources.append(source)
+                serialized_companies.append(company)
 
         response_data = {
             "query": result["original_query"],
-            "research_questions": result["research_questions"],
-            "summary": result["summary"],
-            "report": result["report"],
-            "sources": serialized_sources,
-            "total_sources": len(serialized_sources),
+            "market_topic": result.get("market_topic", ""),
+            "companies": serialized_companies,
+            "total_companies": len(serialized_companies),
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -233,26 +190,26 @@ async def stream_research(request: ResearchRequest):
                 for event in progress_event.events[last_event_count:]:
                     yield f"data: {json.dumps({'type': 'progress', 'data': event})}\n\n"
 
-            # Serialize sources
-            serialized_sources = []
-            for source in result.get("all_sources", []):
-                if hasattr(source, "__dict__"):
-                    serialized_sources.append(source.__dict__)
+            # Serialize companies
+            serialized_companies = []
+            for company in result.get("companies_list", []):
+                if hasattr(company, "__dict__"):
+                    serialized_companies.append(company.__dict__)
                 else:
-                    serialized_sources.append(source)
+                    serialized_companies.append(company)
 
-            # Send final result
+            # Send company discovery result
             final_data = {
                 "query": result["original_query"],
-                "research_questions": result["research_questions"],
-                "summary": result["summary"],
-                "report": result["report"],
-                "sources": serialized_sources,
-                "total_sources": len(serialized_sources),
+                "market_topic": result.get("market_topic", ""),
+                "companies": serialized_companies,
+                "total_companies": len(serialized_companies),
                 "timestamp": datetime.now().isoformat(),
+                "awaiting_user_input": True,
+                "step": "company_review"
             }
 
-            yield f"data: {json.dumps({'type': 'complete', 'data': final_data})}\n\n"
+            yield f"data: {json.dumps({'type': 'company_discovery', 'data': final_data})}\n\n"
 
         except Exception as e:
             logger.error(f"Streaming research error: {e}")
