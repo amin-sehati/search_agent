@@ -63,25 +63,15 @@ class Config:
         """Validate configuration and return status"""
         issues = []
 
-        # Check each API key with more detailed logging
+        # Check each API key
         if not cls.TAVILY_API_KEY:
             issues.append("Tavily API key not configured")
-        else:
-            # Mask the key for logging
-            masked_key = f"{cls.TAVILY_API_KEY[:8]}..." if len(cls.TAVILY_API_KEY) > 8 else "****"
-            print(f"Tavily API key found: {masked_key}")
 
         if not cls.FIRECRAWL_API_KEY:
             issues.append("Firecrawl API key not configured")
-        else:
-            masked_key = f"{cls.FIRECRAWL_API_KEY[:8]}..." if len(cls.FIRECRAWL_API_KEY) > 8 else "****"
-            print(f"Firecrawl API key found: {masked_key}")
 
         if not cls.OPENAI_API_KEY:
             issues.append("OpenAI API key not configured")
-        else:
-            masked_key = f"{cls.OPENAI_API_KEY[:8]}..." if len(cls.OPENAI_API_KEY) > 8 else "****"
-            print(f"OpenAI API key found: {masked_key}")
 
         # LangChain keys are optional for tracing
         if cls.LANGCHAIN_TRACING_V2 == "true" and not cls.LANGCHAIN_API_KEY:

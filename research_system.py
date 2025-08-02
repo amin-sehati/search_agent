@@ -3,18 +3,15 @@ import json
 import logging
 import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, asdict
-from typing import List, Dict, Any, Optional, Union, Annotated, TypedDict
+from dataclasses import dataclass
+from typing import List, Dict, Any, Optional, Annotated, TypedDict
 from datetime import datetime
 import aiohttp
-import openai
-from pydantic import BaseModel
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, AIMessage
-import operator
 
 load_dotenv()
 
@@ -121,12 +118,10 @@ class TavilyRetriever(BaseRetriever):
             "max_results": min(max_results, 5),
         }
         
-        # Log for debugging in Vercel (mask API key)
-        debug_payload = payload.copy()
-        if self.api_key:
-            debug_payload["api_key"] = f"{self.api_key[:8]}..." if len(self.api_key) > 8 else "****"
-        logger.info(f"Tavily API request to {self.base_url}/search with payload: {debug_payload}")
-        logger.info(f"Tavily API key length: {len(self.api_key) if self.api_key else 0}")
+        # Log for debugging in Vercel (without exposing API keys)
+        logger.info(f"Tavily API request to {self.base_url}/search")
+        logger.info(f"Query: {query}")
+        logger.info(f"Max results: {payload.get('max_results', 'unknown')}")
 
         # For Vercel debugging: log the exact environment
         logger.info(f"Running in Vercel: {os.environ.get('VERCEL', 'false')}")
@@ -197,6 +192,7 @@ class TavilyRetriever(BaseRetriever):
         return results
 
     async def get_content(self, url: str) -> str:
+        # Not implemented for this retriever
         return ""
 
 
@@ -1177,51 +1173,68 @@ class CompanyResearcher:
             raise Exception("Info gathering timeout - partial results saved to checkpoint")
 
     def save_company_research(self, state: Dict[str, Any], filename: str) -> None:
-        """Save company research results"""
-        companies_data = []
-        for company in state.get("companies_list", []):
-            companies_data.append(
-                {
-                    "name": company.name,
-                    "description": company.description,
-                    "reasoning": company.reasoning,
-                    "year_established": company.year_established,
-                    "still_in_business": company.still_in_business,
-                    "history": company.history,
-                    "future_roadmap": company.future_roadmap,
-                }
-            )
+        """Save company research results (disabled in serverless environments)"""
+        # Skip file saving in Vercel/serverless environments (read-only filesystem)
+        if os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'):
+            logger.info(f"Skipping research save in serverless environment: {filename}")
+            return
+            
+        try:
+            companies_data = []
+            for company in state.get("companies_list", []):
+                companies_data.append(
+                    {
+                        "name": company.name,
+                        "description": company.description,
+                        "reasoning": company.reasoning,
+                        "year_established": company.year_established,
+                        "still_in_business": company.still_in_business,
+                        "history": company.history,
+                        "future_roadmap": company.future_roadmap,
+                    }
+                )
 
-        research_data = {
-            "query": state["original_query"],
-            "market_topic": state["market_topic"],
-            "timestamp": datetime.now().isoformat(),
-            "companies": companies_data,
-            "company_pages": state.get("final_company_pages", {}),
-            "total_companies": len(companies_data),
-        }
+            research_data = {
+                "query": state["original_query"],
+                "market_topic": state["market_topic"],
+                "timestamp": datetime.now().isoformat(),
+                "companies": companies_data,
+                "company_pages": state.get("final_company_pages", {}),
+                "total_companies": len(companies_data),
+            }
 
-        with open(filename, "w", encoding="utf-8") as f:
-            json.dump(research_data, f, indent=2, ensure_ascii=False)
+            with open(filename, "w", encoding="utf-8") as f:
+                json.dump(research_data, f, indent=2, ensure_ascii=False)
 
-        logger.info(f"Company research saved to {filename}")
+            logger.info(f"Company research saved to {filename}")
+        except OSError as e:
+            logger.warning(f"Failed to save research results (read-only filesystem): {e}")
     
     def save_checkpoint(self, state: Dict[str, Any], step: str) -> str:
-        """Save checkpoint for resume capability"""
+        """Save checkpoint for resume capability (disabled in serverless environments)"""
+        # Skip checkpoint saving in Vercel/serverless environments (read-only filesystem)
+        if os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'):
+            logger.info(f"Skipping checkpoint save in serverless environment: {step}")
+            return f"checkpoint_{step}_serverless"
+            
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         checkpoint_filename = f"checkpoint_{step}_{timestamp}.json"
         
-        checkpoint_data = {
-            "step": step,
-            "timestamp": datetime.now().isoformat(),
-            "state": self._serialize_state(state)
-        }
-        
-        with open(checkpoint_filename, "w", encoding="utf-8") as f:
-            json.dump(checkpoint_data, f, indent=2, ensure_ascii=False)
+        try:
+            checkpoint_data = {
+                "step": step,
+                "timestamp": datetime.now().isoformat(),
+                "state": self._serialize_state(state)
+            }
             
-        logger.info(f"Checkpoint saved: {checkpoint_filename}")
-        return checkpoint_filename
+            with open(checkpoint_filename, "w", encoding="utf-8") as f:
+                json.dump(checkpoint_data, f, indent=2, ensure_ascii=False)
+                
+            logger.info(f"Checkpoint saved: {checkpoint_filename}")
+            return checkpoint_filename
+        except OSError as e:
+            logger.warning(f"Failed to save checkpoint (read-only filesystem): {e}")
+            return f"checkpoint_{step}_failed"
     
     def load_checkpoint(self, checkpoint_file: str) -> Dict[str, Any]:
         """Load checkpoint to resume processing"""
