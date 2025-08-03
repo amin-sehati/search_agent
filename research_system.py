@@ -6,12 +6,14 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Annotated, TypedDict
 from datetime import datetime
-import aiohttp
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field, field_validator
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, AIMessage
+from tavily import TavilyClient
+from firecrawl import FirecrawlApp
 
 load_dotenv()
 
@@ -73,6 +75,108 @@ class CompanyResearchState(TypedDict):
     awaiting_user_input: bool
 
 
+# Pydantic models for structured LLM outputs
+class MarketTopicExtraction(BaseModel):
+    """Structured output for market topic extraction"""
+
+    market_topic: str = Field(
+        ...,
+        description="A clear, specific description of the market, problem, or topic that companies would be addressing",
+    )
+
+    @field_validator("market_topic")
+    @classmethod
+    def validate_market_topic(cls, v):
+        if len(v.strip()) < 5:
+            raise ValueError("Market topic must be at least 5 characters long")
+        return v.strip()
+
+
+class CompanyInfo(BaseModel):
+    """Structured output for individual company information"""
+
+    name: str = Field(..., description="Company name")
+    description: str = Field(
+        ..., description="Brief description of what the company does"
+    )
+    reasoning: str = Field(
+        ..., description="Why this company is relevant to the market"
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v):
+        if len(v.strip()) < 2:
+            raise ValueError("Company name must be at least 2 characters long")
+        return v.strip()
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v):
+        if len(v.strip()) < 10:
+            raise ValueError("Company description must be at least 10 characters long")
+        return v.strip()
+
+    @field_validator("reasoning")
+    @classmethod
+    def validate_reasoning(cls, v):
+        if len(v.strip()) < 10:
+            raise ValueError("Company reasoning must be at least 10 characters long")
+        return v.strip()
+
+
+class CompanyExtraction(BaseModel):
+    """Structured output for company extraction from sources"""
+
+    companies: List[CompanyInfo] = Field(
+        ...,
+        description="List of companies extracted from the research sources",
+        min_length=1,
+        max_length=10,
+    )
+
+    @field_validator("companies")
+    @classmethod
+    def validate_companies(cls, v):
+        if len(v) == 0:
+            raise ValueError("At least one company must be extracted")
+        return v
+
+
+class CompanyProfile(BaseModel):
+    """Structured output for detailed company profile generation"""
+
+    company_name: str = Field(..., description="Name of the company")
+    overview: str = Field(..., description="Company overview section")
+    status: str = Field(..., description="Business status section")
+    market_position: str = Field(..., description="Market position section")
+    key_facts: str = Field(..., description="Key facts section")
+    sources: List[SearchResult] = Field(
+        ..., description="Sources used to generate the profile"
+    )
+
+    @field_validator("company_name")
+    @classmethod
+    def validate_company_name(cls, v):
+        if len(v.strip()) < 2:
+            raise ValueError("Company name must be at least 2 characters long")
+        return v.strip()
+
+    @field_validator("overview", "status", "market_position", "key_facts")
+    @classmethod
+    def validate_sections(cls, v):
+        if len(v.strip()) < 20:
+            raise ValueError("Each section must be at least 20 characters long")
+        return v.strip()
+
+    @field_validator("sources")
+    @classmethod
+    def validate_sources(cls, v):
+        if not v:
+            raise ValueError("At least one source must be provided")
+        return v
+
+
 class BaseRetriever(ABC):
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -89,7 +193,7 @@ class BaseRetriever(ABC):
 class TavilyRetriever(BaseRetriever):
     def __init__(self, api_key: str):
         super().__init__(api_key)
-        self.base_url = "https://api.tavily.com"
+        self.client = TavilyClient(api_key=api_key)
         self.failure_count = 0
         self.max_failures = 3
         self.circuit_open = False
@@ -99,89 +203,91 @@ class TavilyRetriever(BaseRetriever):
         if self.circuit_open:
             logger.warning("Tavily circuit breaker is open, skipping search")
             return []
-        
+
         # Validate API key
         if not self.api_key or self.api_key.strip() == "":
             logger.error("Tavily API key is empty or not configured")
             self._handle_failure()
             return []
-            
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (compatible; ResearchBot/1.0)"
-        }
-        
-        # Use minimal payload confirmed to work
-        payload = {
-            "api_key": self.api_key,
-            "query": query,
-            "max_results": min(max_results, 5),
-        }
-        
-        # Log for debugging in Vercel (without exposing API keys)
-        logger.info(f"Tavily API request to {self.base_url}/search")
-        logger.info(f"Query: {query}")
-        logger.info(f"Max results: {payload.get('max_results', 'unknown')}")
 
-        # For Vercel debugging: log the exact environment
-        logger.info(f"Running in Vercel: {os.environ.get('VERCEL', 'false')}")
-        logger.info(f"API base URL: {self.base_url}")
-        
-        # Try multiple approaches for better Vercel compatibility
-        attempts = [
-            # Attempt 1: Minimal payload (most likely to work in Vercel)
-            payload,
-            # Attempt 2: Try with different headers for Vercel
-            payload,
+        # Log for debugging
+        logger.info(f"Tavily API search query: {query}")
+        logger.info(f"Max results: {min(max_results, 5)}")
+
+        # Try multiple search configurations
+        search_configs = [
+            # Attempt 1: Basic search with raw content
+            {
+                "query": query,
+                "max_results": min(max_results, 5),
+                "search_depth": "basic",
+                "include_raw_content": True,
+                "include_answer": False,
+            },
+            # Attempt 2: Advanced search with raw content
+            {
+                "query": query,
+                "max_results": min(max_results, 5),
+                "search_depth": "advanced",
+                "include_raw_content": True,
+                "include_answer": False,
+            },
+            # Attempt 3: Simple search as fallback
+            {
+                "query": query,
+                "max_results": min(max_results, 5),
+            },
         ]
-        
-        # Different header configurations for each attempt
-        header_configs = [
-            headers,  # Original headers
-            {"Content-Type": "application/json"},  # Minimal headers
-        ]
-        
-        for attempt_num, attempt_payload in enumerate(attempts, 1):
+
+        for attempt_num, search_kwargs in enumerate(search_configs, 1):
             try:
-                logger.info(f"Tavily API attempt {attempt_num}/{len(attempts)}")
-                attempt_headers = header_configs[attempt_num - 1]
-                
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
-                    async with session.post(
-                        f"{self.base_url}/search", headers=attempt_headers, json=attempt_payload
-                    ) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            self.failure_count = 0  # Reset on success
-                            logger.info(f"Tavily API success on attempt {attempt_num}")
-                            return self._format_tavily_results(data)
-                        else:
-                            # Get detailed error information
-                            try:
-                                error_data = await response.text()
-                                logger.warning(f"Tavily attempt {attempt_num} failed: {response.status} - {error_data}")
-                            except:
-                                logger.warning(f"Tavily attempt {attempt_num} failed: {response.status}")
-                            
-                            # Don't handle as failure yet, try next attempt
-                            if attempt_num == len(attempts):
-                                self._handle_failure()
-                                return []
-                                
+                logger.info(
+                    f"Tavily search attempt {attempt_num}/{len(search_configs)}"
+                )
+
+                # Use the official Tavily client
+                response = self.client.search(**search_kwargs)
+
+                if response and response.get("results"):
+                    self.failure_count = 0  # Reset on success
+                    formatted_results = self._format_tavily_results(response)
+                    logger.info(
+                        f"Tavily API success on attempt {attempt_num}: {len(formatted_results)} results"
+                    )
+
+                    # If we get results, return immediately
+                    if len(formatted_results) > 0:
+                        return formatted_results
+                    else:
+                        logger.warning(
+                            f"Tavily attempt {attempt_num} returned 0 results, trying next attempt"
+                        )
+                        continue
+                else:
+                    logger.warning(f"Tavily attempt {attempt_num} returned no results")
+                    continue
+
             except Exception as e:
                 logger.warning(f"Tavily attempt {attempt_num} error: {e}")
-                if attempt_num == len(attempts):
+                if attempt_num == len(search_configs):
+                    logger.warning("All Tavily attempts failed with exceptions")
                     self._handle_failure()
                     return []
-        
+
+        # If we reach here, all attempts returned 0 results
+        logger.info(
+            "All Tavily attempts returned 0 results - continuing without Tavily data"
+        )
         return []
-    
+
     def _handle_failure(self):
         """Handle API failures and circuit breaker logic"""
         self.failure_count += 1
         if self.failure_count >= self.max_failures:
             self.circuit_open = True
-            logger.warning(f"Tavily circuit breaker opened after {self.failure_count} failures")
+            logger.warning(
+                f"Tavily circuit breaker opened after {self.failure_count} failures"
+            )
 
     def _format_tavily_results(self, data: Dict) -> List[SearchResult]:
         results = []
@@ -206,61 +312,55 @@ class TavilyRetriever(BaseRetriever):
 class FirecrawlRetriever(BaseRetriever):
     def __init__(self, api_key: str):
         super().__init__(api_key)
-        self.base_url = "https://api.firecrawl.dev/v0"
+        self.app = FirecrawlApp(api_key=api_key)
         self.failure_count = 0
         self.max_failures = 3
-        self.circuit_open = False
 
     async def search(self, query: str, max_results: int = 10) -> List[SearchResult]:
-        # Circuit breaker check
-        if self.circuit_open:
-            logger.warning("Firecrawl circuit breaker is open, skipping search")
-            return []
-            
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
 
-        payload = {
-            "query": query,
-            "pageOptions": {"onlyMainContent": True, "includeHtml": False},
-            "limit": min(max_results, 5),  # Limit results
-        }
+        # Log for debugging
+        logger.info(f"Firecrawl search query: {query}")
+        logger.info(f"Max results: {min(max_results, 5)}")
 
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
-                async with session.post(
-                    f"{self.base_url}/search", headers=headers, json=payload
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        self.failure_count = 0  # Reset on success
-                        return self._format_firecrawl_results(data)
-                    else:
-                        logger.error(f"Firecrawl search failed: {response.status}")
-                        self._handle_failure()
-                        return []
+            # Use the official Firecrawl client
+            search_params = {"query": query, "limit": min(max_results, 5)}
+
+            response = self.app.search(**search_params)
+
+            if response and response.data:
+                self.failure_count = 0  # Reset on success
+                formatted_results = self._format_firecrawl_results(response)
+                logger.info(
+                    f"Firecrawl search success: {len(formatted_results)} results"
+                )
+                return formatted_results
+            else:
+                logger.warning("Firecrawl returned no results")
+                return []
+
         except Exception as e:
             logger.error(f"Firecrawl search error: {e}")
             self._handle_failure()
             return []
-    
+
     def _handle_failure(self):
         """Handle API failures and circuit breaker logic"""
         self.failure_count += 1
         if self.failure_count >= self.max_failures:
             self.circuit_open = True
-            logger.warning(f"Firecrawl circuit breaker opened after {self.failure_count} failures")
+            logger.warning(
+                f"Firecrawl circuit breaker opened after {self.failure_count} failures"
+            )
 
-    def _format_firecrawl_results(self, data: Dict) -> List[SearchResult]:
+    def _format_firecrawl_results(self, response) -> List[SearchResult]:
         results = []
-        for item in data.get("data", []):
+        for item in response.data if hasattr(response, "data") else []:
             result = SearchResult(
-                title=item.get("metadata", {}).get("title", ""),
-                url=item.get("metadata", {}).get("sourceURL", ""),
-                snippet=item.get("extract", "")[:500],
-                content=item.get("markdown", ""),
+                title=getattr(item, "title", ""),
+                url=getattr(item, "url", ""),
+                snippet=getattr(item, "description", "")[:500],
+                content=getattr(item, "description", ""),
                 score=1.0,
                 source="firecrawl",
             )
@@ -268,29 +368,16 @@ class FirecrawlRetriever(BaseRetriever):
         return results
 
     async def get_content(self, url: str) -> str:
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
-
-        payload = {
-            "url": url,
-            "pageOptions": {"onlyMainContent": True, "includeHtml": False},
-        }
-
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.base_url}/scrape", headers=headers, json=payload
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return data.get("data", {}).get("markdown", "")
-                    else:
-                        logger.error(f"Firecrawl scrape failed: {response.status}")
-                        return ""
+            # Use the official Firecrawl client for scraping
+            scrape_params = {"url": url, "formats": ["json", "markdown"]}
+
+            response = self.app.scrape_url(**scrape_params)
+
+            return response["data"]["json"]
+
         except Exception as e:
-            logger.error(f"Firecrawl scrape error: {e}")
+            logger.error(f"Firecrawl scrape error for {url}: {e}")
             return ""
 
 
@@ -303,20 +390,43 @@ class UserInputAgent:
         print("=" * 60)
 
         query = state["original_query"]
+        print(f"📝 Processing query: '{query}'", flush=True)
 
         market_extraction_prompt = f"""
         Extract the market, problem, or topic from this user query: "{query}"
-        
-        Provide a clear, specific description of the market/problem/topic that companies would be addressing.
-        This will be used to search for companies operating in this space.
-        
-        Return just the market/problem/topic description, nothing else.
+        This will be used to search for companies operating in this space. Keep it short and concise (less than 300 characters)but 
+        preserve the nuance of the user's query.
         """
 
-        response = await self.llm.ainvoke(
-            [HumanMessage(content=market_extraction_prompt)]
+        print(
+            "🤖 Calling LLM for market topic extraction with structured output...",
+            flush=True,
         )
-        market_topic = response.content.strip()
+
+        # Use structured output with Pydantic model
+        llm_with_structured_output = self.llm.with_structured_output(
+            MarketTopicExtraction
+        )
+
+        try:
+            response = await llm_with_structured_output.ainvoke(
+                [HumanMessage(content=market_extraction_prompt)]
+            )
+            market_topic = response.market_topic
+            print(
+                f"✅ Market/Topic extracted and validated: {market_topic}", flush=True
+            )
+        except Exception as e:
+            print(
+                f"❌ Structured output failed, falling back to text parsing: {e}",
+                flush=True,
+            )
+            # Fallback to regular LLM call
+            response = await self.llm.ainvoke(
+                [HumanMessage(content=market_extraction_prompt)]
+            )
+            market_topic = response.content.strip()
+            print(f"⚠️ Fallback market topic: {market_topic}", flush=True)
 
         print(f"✅ Market/Topic identified: {market_topic}")
         print("=" * 60)
@@ -441,16 +551,12 @@ class TavilyCompanyDiscoveryAgent:
         results = await self.retriever.search(company_query, max_results=10)
         print(f"   ✓ Found {len(results)} company sources")
 
-        # If Tavily fails completely, use fallback mock data in serverless environments
+        # If Tavily returns no results, log warning but continue (Firecrawl can still provide results)
         if len(results) == 0:
-            logger.warning("Tavily returned no results - this may indicate API issues")
-            print("   ⚠️  Tavily API may be experiencing issues")
-            
-            # In serverless environments, provide fallback mock data
-            if os.environ.get('VERCEL'):
-                logger.info("Using Tavily fallback data for Vercel environment")
-                results = self._get_tavily_fallback_data(market_topic)
-                print(f"   📋 Using fallback data: {len(results)} mock sources")
+            logger.warning(
+                "Tavily returned no results - continuing with Firecrawl only"
+            )
+            print("   ⚠️  Tavily returned no results - will rely on Firecrawl")
 
         print(f"✅ Tavily company discovery complete: {len(results)} sources")
         print("=" * 60)
@@ -463,36 +569,6 @@ class TavilyCompanyDiscoveryAgent:
                 AIMessage(content=f"Tavily found {len(results)} company sources.")
             ],
         }
-    
-    def _get_tavily_fallback_data(self, market_topic: str) -> List[SearchResult]:
-        """Generate fallback data when Tavily API fails in serverless environments"""
-        fallback_data = [
-            SearchResult(
-                title="Company Directory - Industry Leaders",
-                url="https://example.com/companies",
-                snippet=f"Directory of leading companies in {market_topic} market including established players and emerging startups.",
-                content="",
-                score=0.8,
-                source="tavily_fallback"
-            ),
-            SearchResult(
-                title="Market Analysis Report",
-                url="https://example.com/market-analysis", 
-                snippet=f"Comprehensive analysis of {market_topic} market with key players and competitive landscape.",
-                content="",
-                score=0.7,
-                source="tavily_fallback"
-            ),
-            SearchResult(
-                title="Industry Overview",
-                url="https://example.com/industry-overview",
-                snippet=f"Overview of companies operating in {market_topic} space with business models and market positioning.",
-                content="",
-                score=0.6,
-                source="tavily_fallback"
-            )
-        ]
-        return fallback_data
 
 
 class FirecrawlCompanyDiscoveryAgent:
@@ -515,16 +591,11 @@ class FirecrawlCompanyDiscoveryAgent:
         results = await self.retriever.search(company_query, max_results=10)
         print(f"   ✓ Found {len(results)} company sources")
 
-        # If Firecrawl fails completely, use fallback mock data in serverless environments
+        # If Firecrawl fails completely, raise an error
         if len(results) == 0:
-            logger.warning("Firecrawl returned no results - this may indicate API issues")
-            print("   ⚠️  Firecrawl API may be experiencing issues")
-            
-            # In serverless environments, provide fallback mock data
-            if os.environ.get('VERCEL'):
-                logger.info("Using Firecrawl fallback data for Vercel environment")
-                results = self._get_firecrawl_fallback_data(market_topic)
-                print(f"   📋 Using fallback data: {len(results)} mock sources")
+            logger.error("Firecrawl returned no results - API is not functioning")
+            print("   ❌ Firecrawl API failed - cannot continue")
+            raise Exception("Firecrawl search API failed to return results")
 
         print(f"✅ Firecrawl company discovery complete: {len(results)} sources")
         print("=" * 60)
@@ -539,52 +610,6 @@ class FirecrawlCompanyDiscoveryAgent:
                 AIMessage(content=f"Firecrawl found {len(results)} company sources.")
             ],
         }
-    
-    def _get_firecrawl_fallback_data(self, market_topic: str) -> List[SearchResult]:
-        """Generate fallback data when Firecrawl API fails in serverless environments"""
-        fallback_data = [
-            SearchResult(
-                title="Startup Database - Emerging Companies",
-                url="https://example.com/startups",
-                snippet=f"Database of emerging startups and established companies in {market_topic} market with detailed profiles.",
-                content="",
-                score=0.9,
-                source="firecrawl_fallback"
-            ),
-            SearchResult(
-                title="Business Directory",
-                url="https://example.com/business-directory",
-                snippet=f"Comprehensive business directory featuring companies in {market_topic} sector with contact information and business details.",
-                content="",
-                score=0.8,
-                source="firecrawl_fallback"
-            ),
-            SearchResult(
-                title="Industry News and Companies",
-                url="https://example.com/industry-news",
-                snippet=f"Latest news and updates about companies operating in {market_topic} market including new entrants and market leaders.",
-                content="",
-                score=0.7,
-                source="firecrawl_fallback"
-            ),
-            SearchResult(
-                title="Company Profiles Portal",
-                url="https://example.com/company-profiles",
-                snippet=f"Detailed company profiles and analysis for businesses in {market_topic} space including financial information and market position.",
-                content="",
-                score=0.6,
-                source="firecrawl_fallback"
-            ),
-            SearchResult(
-                title="Market Research Report",
-                url="https://example.com/market-research",
-                snippet=f"In-depth market research covering key players and competitive dynamics in {market_topic} industry.",
-                content="",
-                score=0.5,
-                source="firecrawl_fallback"
-            )
-        ]
-        return fallback_data
 
 
 class CompanyListSynthesizer:
@@ -631,10 +656,12 @@ class CompanyListSynthesizer:
             logger.error(f"Company extraction failed: {e}")
             companies = []
 
-        # Fallback if no companies found - create market-specific examples
+        # Error if no companies found - core function must work
         if not companies:
-            logger.warning("No companies extracted, creating fallback list")
-            companies = self._create_fallback_companies(market_topic)
+            logger.error("No companies extracted from search results")
+            raise Exception(
+                "Failed to extract companies from research data - core function failure"
+            )
 
         print(f"✅ Company list synthesis complete! Found {len(companies)} companies")
         print("=" * 60)
@@ -658,18 +685,39 @@ class CompanyListSynthesizer:
     async def _extract_companies(
         self, market_topic: str, sources: List[SearchResult]
     ) -> List[Company]:
-        """Extract company information from search results with optimized processing"""
+        """Extract company information from search results with optimized processing and structured output"""
 
         # Optimized content limits to reduce processing time
-        MAX_CONTENT_LENGTH = 4000  # Reduced from 8000
-        MAX_SNIPPET_LENGTH = 300   # Reduced from 500
+        MAX_CONTENT_LENGTH = 4000
+        MAX_SNIPPET_LENGTH = 300
         content_chunks = []
         total_length = 0
 
-        for source in sources[:8]:  # Reduced from 10 sources
-            # Truncate snippet if too long
-            snippet = source.snippet[:MAX_SNIPPET_LENGTH] if source.snippet else ""
-            chunk = f"Source: {source.title}\nURL: {source.url}\nContent: {snippet}\n\n"
+        print(
+            f"📊 Processing {len(sources)} sources for company extraction...",
+            flush=True,
+        )
+
+        for source in sources[:8]:
+            # Use best available content: full content > snippet > empty
+            if source.content and source.content.strip():
+                # Use full content but truncate if too long
+                content_text = (
+                    source.content[: MAX_SNIPPET_LENGTH * 3]
+                    if len(source.content) > MAX_SNIPPET_LENGTH * 3
+                    else source.content
+                )
+            elif source.snippet and source.snippet.strip():
+                # Use snippet (which contains Tavily's enhanced content) - allow more length
+                content_text = (
+                    source.snippet[: MAX_SNIPPET_LENGTH * 2]
+                    if len(source.snippet) > MAX_SNIPPET_LENGTH * 2
+                    else source.snippet
+                )
+            else:
+                content_text = ""
+
+            chunk = f"Source: {source.title}\nURL: {source.url}\nContent: {content_text}\n\n"
 
             if total_length + len(chunk) > MAX_CONTENT_LENGTH:
                 break
@@ -680,143 +728,125 @@ class CompanyListSynthesizer:
         combined_content = "".join(content_chunks)
 
         if not combined_content.strip():
+            print("❌ No content available for company extraction", flush=True)
             logger.warning("No content available for company extraction")
             return []
 
-        # Optimized prompt for faster processing
+        print(
+            f"📝 Content prepared: {len(content_chunks)} chunks, {total_length} characters",
+            flush=True,
+        )
+
+        # Optimized prompt for structured output
         prompt = f"""
-        Extract companies from this {market_topic} market data. Return ONLY a JSON array:
+        Extract companies from this {market_topic} market data:
 
         {combined_content}
 
-        Format: [{{
-            "name": "Company Name",
-            "description": "Brief description",
-            "reasoning": "Market relevance"
-        }}]
-
-        Max 8 companies. Real companies only.
+        Find real companies operating in this market space. Focus on actual companies mentioned in the sources.
+        Provide their names, brief descriptions, and why they're relevant to this market.
+        Maximum 8 companies.
         """
 
         try:
+            print(
+                "🤖 Calling LLM for company extraction with structured output...",
+                flush=True,
+            )
             logger.info(
                 f"Extracting companies from {len(content_chunks)} sources, {total_length} characters"
             )
 
-            # Reduced timeout for faster failure detection
-            response = await asyncio.wait_for(
-                self.llm.ainvoke([HumanMessage(content=prompt)]),
-                timeout=30.0,  # Reduced from 60 seconds
+            # Use structured output with Pydantic model
+            llm_with_structured_output = self.llm.with_structured_output(
+                CompanyExtraction
             )
 
-            # Clean and parse JSON response
-            response_content = response.content.strip()
-            if response_content.startswith("```json"):
-                response_content = response_content[7:]
-            if response_content.endswith("```"):
-                response_content = response_content[:-3]
+            response = await asyncio.wait_for(
+                llm_with_structured_output.ainvoke([HumanMessage(content=prompt)]),
+                timeout=45.0,
+            )
 
-            companies_data = json.loads(response_content.strip())
+            print(
+                f"✅ Structured company extraction successful: {len(response.companies)} companies",
+                flush=True,
+            )
 
-            if not isinstance(companies_data, list):
-                logger.error("Response is not a list format")
-                return []
-
+            # Convert Pydantic models to dataclass objects
             companies = []
-            for item in companies_data:
-                if isinstance(item, dict) and item.get("name"):
-                    company = Company(
-                        name=item.get("name", ""),
-                        description=item.get("description", ""),
-                        reasoning=item.get("reasoning", ""),
-                    )
-                    companies.append(company)
+            for company_info in response.companies:
+                company = Company(
+                    name=company_info.name,
+                    description=company_info.description,
+                    reasoning=company_info.reasoning,
+                )
+                companies.append(company)
+                print(f"  📋 Extracted: {company_info.name}", flush=True)
 
             logger.info(f"Successfully extracted {len(companies)} companies")
             return companies
 
         except asyncio.TimeoutError:
-            logger.error("Company extraction timed out after 30 seconds")
-            return []
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON parsing error in company extraction: {e}")
-            logger.error(
-                f"Response content: {response.content[:300] if 'response' in locals() else 'No response'}"
-            )
+            print("⏰ Company extraction timed out after 45 seconds", flush=True)
+            logger.error("Company extraction timed out after 45 seconds")
             return []
         except Exception as e:
+            print(f"❌ Structured company extraction failed: {e}", flush=True)
             logger.error(f"Error extracting companies: {e}")
-            return []
-    
-    def _create_fallback_companies(self, market_topic: str) -> List[Company]:
-        """Create fallback companies based on market topic for demonstration purposes"""
-        market_lower = market_topic.lower()
-        
-        if "ride" in market_lower and "shar" in market_lower:
-            return [
-                Company(
-                    name="Uber",
-                    description="Global ride-sharing and mobility platform",
-                    reasoning="Leading ride-sharing company that pioneered the market"
-                ),
-                Company(
-                    name="Lyft", 
-                    description="Ride-sharing service focused on North American markets",
-                    reasoning="Major competitor to Uber in ride-sharing space"
-                ),
-                Company(
-                    name="DiDi",
-                    description="Chinese ride-sharing and mobility company",
-                    reasoning="Dominant ride-sharing platform in Asia Pacific region"
-                ),
-                Company(
-                    name="Bolt",
-                    description="European ride-sharing and mobility platform",
-                    reasoning="Leading ride-sharing service in Europe and Africa"
-                ),
-                Company(
-                    name="Grab",
-                    description="Southeast Asian ride-sharing and super app",
-                    reasoning="Multi-service platform including ride-sharing in Southeast Asia"
+
+            # Fallback to original JSON parsing method
+            print("🔄 Falling back to JSON parsing method...", flush=True)
+            try:
+                response = await asyncio.wait_for(
+                    self.llm.ainvoke(
+                        [
+                            HumanMessage(
+                                content=prompt
+                                + "\n\nReturn as JSON array with fields: name, description, reasoning"
+                            )
+                        ]
+                    ),
+                    timeout=30.0,
                 )
-            ]
-        elif "food" in market_lower and "deliver" in market_lower:
-            return [
-                Company(
-                    name="DoorDash",
-                    description="Food delivery platform",
-                    reasoning="Leading food delivery service in North America"
-                ),
-                Company(
-                    name="Uber Eats",
-                    description="Food delivery arm of Uber",
-                    reasoning="Global food delivery platform leveraging Uber's network"
-                ),
-                Company(
-                    name="Grubhub",
-                    description="Online food delivery platform",
-                    reasoning="Established food delivery service in US market"
+
+                # Clean and parse JSON response
+                response_content = response.content.strip()
+                if response_content.startswith("```json"):
+                    response_content = response_content[7:]
+                if response_content.endswith("```"):
+                    response_content = response_content[:-3]
+
+                companies_data = json.loads(response_content.strip())
+
+                if not isinstance(companies_data, list):
+                    logger.error("Response is not a list format")
+                    return []
+
+                companies = []
+                for item in companies_data:
+                    if isinstance(item, dict) and item.get("name"):
+                        company = Company(
+                            name=item.get("name", ""),
+                            description=item.get("description", ""),
+                            reasoning=item.get("reasoning", ""),
+                        )
+                        companies.append(company)
+
+                print(
+                    f"✅ Fallback extraction successful: {len(companies)} companies",
+                    flush=True,
                 )
-            ]
-        else:
-            # Generic fallback for other markets
-            return [
-                Company(
-                    name="Market Leader Inc",
-                    description=f"Leading company in {market_topic} market",
-                    reasoning=f"Established player with significant market share in {market_topic}"
-                ),
-                Company(
-                    name="Innovation Startup",
-                    description=f"Emerging company disrupting {market_topic} space",
-                    reasoning=f"New entrant bringing innovative solutions to {market_topic} market"
-                ),
-                Company(
-                    name="Global Enterprise",
-                    description=f"International corporation operating in {market_topic}",
-                    reasoning=f"Large-scale enterprise with global presence in {market_topic} sector"
+                logger.info(
+                    f"Fallback: Successfully extracted {len(companies)} companies"
                 )
-            ]
+                return companies
+
+            except Exception as fallback_error:
+                print(
+                    f"❌ Fallback extraction also failed: {fallback_error}", flush=True
+                )
+                logger.error(f"Fallback extraction error: {fallback_error}")
+                return []
 
 
 class CompanyInfoGatheringAgent:
@@ -841,71 +871,84 @@ class CompanyInfoGatheringAgent:
 
         # Process companies in parallel batches to avoid timeouts
         BATCH_SIZE = 3  # Process 3 companies at a time
-        
+
         async def research_company(company):
             try:
                 print(f"   Researching: {company.name}")
-                
+
                 # Create optimized search query
                 query = f"{company.name} company business"
-                
+
                 # Use asyncio.gather for parallel API calls with timeout
                 try:
-                    tavily_task = self.tavily_retriever.search(query, max_results=5)  # Reduced from 10
-                    firecrawl_task = self.firecrawl_retriever.search(query, max_results=5)  # Reduced from 10
-                    
+                    tavily_task = self.tavily_retriever.search(
+                        query, max_results=5
+                    )  # Reduced from 10
+                    firecrawl_task = self.firecrawl_retriever.search(
+                        query, max_results=5
+                    )  # Reduced from 10
+
                     # Add timeout to prevent hanging
                     tavily_results, firecrawl_results = await asyncio.wait_for(
-                        asyncio.gather(tavily_task, firecrawl_task, return_exceptions=True),
-                        timeout=45.0  # 45 second timeout per company
+                        asyncio.gather(
+                            tavily_task, firecrawl_task, return_exceptions=True
+                        ),
+                        timeout=45.0,  # 45 second timeout per company
                     )
-                    
+
                     # Handle exceptions
                     if isinstance(tavily_results, Exception):
-                        logger.warning(f"Tavily search failed for {company.name}: {tavily_results}")
+                        logger.warning(
+                            f"Tavily search failed for {company.name}: {tavily_results}"
+                        )
                         tavily_results = []
                     if isinstance(firecrawl_results, Exception):
-                        logger.warning(f"Firecrawl search failed for {company.name}: {firecrawl_results}")
+                        logger.warning(
+                            f"Firecrawl search failed for {company.name}: {firecrawl_results}"
+                        )
                         firecrawl_results = []
-                        
+
                 except asyncio.TimeoutError:
                     logger.warning(f"Search timeout for {company.name}, using fallback")
                     tavily_results, firecrawl_results = [], []
-                
+
                 all_results = tavily_results + firecrawl_results
-                
+
                 print(f"     ✓ Found {len(all_results)} sources for {company.name}")
                 return company.name, all_results
-                
+
             except Exception as e:
                 logger.error(f"Error researching {company.name}: {e}")
                 return company.name, []
-        
+
         # Process companies in batches
         for i in range(0, len(companies), BATCH_SIZE):
-            batch = companies[i:i + BATCH_SIZE]
-            print(f"   Processing batch {i//BATCH_SIZE + 1}/{(len(companies) + BATCH_SIZE - 1)//BATCH_SIZE}")
-            
+            batch = companies[i : i + BATCH_SIZE]
+            print(
+                f"   Processing batch {i//BATCH_SIZE + 1}/{(len(companies) + BATCH_SIZE - 1)//BATCH_SIZE}"
+            )
+
             try:
                 # Process batch with timeout
                 batch_results = await asyncio.wait_for(
                     asyncio.gather(*[research_company(company) for company in batch]),
-                    timeout=120.0  # 2 minutes per batch
+                    timeout=120.0,  # 2 minutes per batch
                 )
-                
+
                 # Store results
                 for company_name, results in batch_results:
                     detailed_info[company_name] = results
-                    
+
             except asyncio.TimeoutError:
-                logger.error(f"Batch {i//BATCH_SIZE + 1} timed out, processing individually")
-                
+                logger.error(
+                    f"Batch {i//BATCH_SIZE + 1} timed out, processing individually"
+                )
+
                 # Fallback: process individually with shorter timeout
                 for company in batch:
                     try:
                         company_name, results = await asyncio.wait_for(
-                            research_company(company),
-                            timeout=30.0
+                            research_company(company), timeout=30.0
                         )
                         detailed_info[company_name] = results
                     except asyncio.TimeoutError:
@@ -942,58 +985,71 @@ class FinalCompanySynthesizer:
 
         # Process company pages in parallel batches
         BATCH_SIZE = 4  # Process 4 company pages at a time
-        
+
         async def create_single_page(company):
             try:
                 print(f"   Creating page: {company.name}")
                 company_sources = detailed_info.get(company.name, [])
-                
+
                 # Add timeout for page creation
                 page_content = await asyncio.wait_for(
                     self._create_company_page(company, company_sources),
-                    timeout=45.0  # 45 seconds per page
+                    timeout=45.0,  # 45 seconds per page
                 )
-                
-                print(f"     ✓ Page created for {company.name} with {len(company_sources)} sources")
+
+                print(
+                    f"     ✓ Page created for {company.name} with {len(company_sources)} sources"
+                )
                 return company.name, page_content
-                
+
             except asyncio.TimeoutError:
                 logger.warning(f"Page creation timeout for {company.name}")
-                return company.name, f"# {company.name}\n\nPage creation timed out. Basic info: {company.description}"
+                return (
+                    company.name,
+                    f"# {company.name}\n\nPage creation timed out. Basic info: {company.description}",
+                )
             except Exception as e:
                 logger.error(f"Error creating page for {company.name}: {e}")
-                return company.name, f"# {company.name}\n\nError creating page: {company.description}"
+                return (
+                    company.name,
+                    f"# {company.name}\n\nError creating page: {company.description}",
+                )
 
         # Process in batches to avoid overwhelming the system
         for i in range(0, len(companies), BATCH_SIZE):
-            batch = companies[i:i + BATCH_SIZE]
-            print(f"   Processing page batch {i//BATCH_SIZE + 1}/{(len(companies) + BATCH_SIZE - 1)//BATCH_SIZE}")
-            
+            batch = companies[i : i + BATCH_SIZE]
+            print(
+                f"   Processing page batch {i//BATCH_SIZE + 1}/{(len(companies) + BATCH_SIZE - 1)//BATCH_SIZE}"
+            )
+
             try:
                 # Process batch with timeout
                 batch_results = await asyncio.wait_for(
                     asyncio.gather(*[create_single_page(company) for company in batch]),
-                    timeout=120.0  # 2 minutes per batch
+                    timeout=120.0,  # 2 minutes per batch
                 )
-                
+
                 # Store results
                 for company_name, page_content in batch_results:
                     final_pages[company_name] = page_content
-                    
+
             except asyncio.TimeoutError:
-                logger.error(f"Page batch {i//BATCH_SIZE + 1} timed out, processing individually")
-                
+                logger.error(
+                    f"Page batch {i//BATCH_SIZE + 1} timed out, processing individually"
+                )
+
                 # Fallback: process individually
                 for company in batch:
                     try:
                         company_name, page_content = await asyncio.wait_for(
-                            create_single_page(company),
-                            timeout=30.0
+                            create_single_page(company), timeout=30.0
                         )
                         final_pages[company_name] = page_content
                     except asyncio.TimeoutError:
                         logger.warning(f"Individual page timeout for {company.name}")
-                        final_pages[company.name] = f"# {company.name}\n\nTimeout creating detailed page."
+                        final_pages[company.name] = (
+                            f"# {company.name}\n\nTimeout creating detailed page."
+                        )
 
         print(f"✅ Final synthesis complete! Created {len(final_pages)} company pages")
         print("=" * 60)
@@ -1012,28 +1068,50 @@ class FinalCompanySynthesizer:
     async def _create_company_page(
         self, company: Company, sources: List[SearchResult]
     ) -> str:
-        """Create a comprehensive page for a single company with optimized processing"""
+        """Create a comprehensive page for a single company with structured output"""
 
         # Limit content to prevent timeouts
         MAX_SOURCES = 5
         MAX_CONTENT_LENGTH = 2000
-        
+
         content_chunks = []
         total_length = 0
-        
+
+        print(
+            f"📄 Creating profile for {company.name} with {len(sources)} sources...",
+            flush=True,
+        )
+
         for source in sources[:MAX_SOURCES]:
-            snippet = source.snippet[:400] if source.snippet else ""  # Limit snippet length
-            chunk = f"Source: {source.title}\nContent: {snippet}\n\n"
-            
+            # Use best available content: full content > snippet > empty
+            if source.content and source.content.strip():
+                # Use full content but limit length for processing efficiency
+                content_text = (
+                    source.content[:800]
+                    if len(source.content) > 800
+                    else source.content
+                )
+            elif source.snippet and source.snippet.strip():
+                # Use snippet (which contains Tavily's enhanced content) - allow more length
+                content_text = (
+                    source.snippet[:600]
+                    if len(source.snippet) > 600
+                    else source.snippet
+                )
+            else:
+                content_text = ""
+
+            chunk = f"Source: {source.title}\nContent: {content_text}\n\n"
+
             if total_length + len(chunk) > MAX_CONTENT_LENGTH:
                 break
-                
+
             content_chunks.append(chunk)
             total_length += len(chunk)
 
         combined_content = "".join(content_chunks)
 
-        # Simplified prompt for faster processing
+        # Simplified prompt for structured output
         prompt = f"""
         Create a company profile for "{company.name}":
 
@@ -1043,28 +1121,91 @@ class FinalCompanySynthesizer:
         Research Data:
         {combined_content}
 
-        Include:
-        ## Overview
-        ## Status  
-        ## Market Position
-        ## Key Facts
+        Available Sources:
+        {chr(10).join([f"- {source.title} ({source.url})" for source in sources[:10]])}
 
-        Keep concise. Use markdown format.
+        Create a comprehensive profile with proper markdown formatting. Include the most relevant sources that were used to generate each section of the profile.
         """
 
         try:
-            # Reduced timeout for faster page creation
+            print(f"🤖 Generating structured profile for {company.name}...", flush=True)
+
+            # Use structured output with Pydantic model
+            llm_with_structured_output = self.llm.with_structured_output(CompanyProfile)
+
             response = await asyncio.wait_for(
-                self.llm.ainvoke([HumanMessage(content=prompt)]),
-                timeout=25.0  # 25 seconds per page
+                llm_with_structured_output.ainvoke([HumanMessage(content=prompt)]),
+                timeout=35.0,
             )
-            return response.content.strip()
+
+            # Convert structured response to markdown
+            sources_section = ""
+            if response.sources:
+                sources_section = "\n\n## Sources\n" + "\n".join(
+                    [
+                        f"- [{source.title}]({source.url})"
+                        for source in response.sources[:10]
+                    ]
+                )
+
+            markdown_content = f"""# {response.company_name}
+
+## Overview
+{response.overview}
+
+## Status
+{response.status}
+
+## Market Position
+{response.market_position}
+
+## Key Facts
+{response.key_facts}{sources_section}
+
+---
+*Research conducted on {datetime.now().strftime('%Y-%m-%d')}*"""
+
+            print(f"✅ Structured profile created for {company.name}", flush=True)
+            return markdown_content
+
         except asyncio.TimeoutError:
+            print(f"⏰ Profile creation timeout for {company.name}", flush=True)
             logger.warning(f"Page creation timeout for {company.name}")
             return f"# {company.name}\n\n## Overview\n{company.description}\n\n## Market Role\n{company.reasoning}\n\n*Detailed analysis timed out*"
         except Exception as e:
+            print(
+                f"❌ Structured profile creation failed for {company.name}: {e}",
+                flush=True,
+            )
             logger.error(f"Error creating company page for {company.name}: {e}")
-            return f"# {company.name}\n\n## Overview\n{company.description}\n\n## Market Role\n{company.reasoning}"
+
+            # Fallback to simple text generation
+            print(
+                f"🔄 Falling back to simple text generation for {company.name}...",
+                flush=True,
+            )
+            try:
+                simple_prompt = f"""
+                Create a markdown company profile for "{company.name}":
+                
+                Description: {company.description}
+                Market Role: {company.reasoning}
+                
+                Use markdown headers and keep it concise.
+                """
+
+                response = await asyncio.wait_for(
+                    self.llm.ainvoke([HumanMessage(content=simple_prompt)]),
+                    timeout=20.0,
+                )
+                print(f"✅ Fallback profile created for {company.name}", flush=True)
+                return response.content.strip()
+            except Exception as fallback_error:
+                print(
+                    f"❌ Fallback profile creation also failed for {company.name}: {fallback_error}",
+                    flush=True,
+                )
+                return f"# {company.name}\n\n## Overview\n{company.description}\n\n## Market Role\n{company.reasoning}"
 
     async def _generate_summary(self, query: str, sources: List[SearchResult]) -> str:
         if not sources:
@@ -1164,7 +1305,7 @@ class CompanyResearcher:
             model=model,
             temperature=0,
             request_timeout=30.0,  # Reduced from 60 seconds
-            max_retries=1,         # Reduced from 2 retries
+            max_retries=1,  # Reduced from 2 retries
         )
 
         # Initialize retrievers
@@ -1187,7 +1328,7 @@ class CompanyResearcher:
 
         # Build the graph
         self.workflow = self._build_workflow()
-        
+
         # Add checkpoint capability
         self.checkpoint_file = None
 
@@ -1266,11 +1407,13 @@ class CompanyResearcher:
         try:
             discovery_state = await asyncio.wait_for(
                 self.workflow.ainvoke(initial_state),
-                timeout=240.0  # 4 minutes for discovery phase
+                timeout=240.0,  # 4 minutes for discovery phase
             )
-            
+
             # Save checkpoint after discovery
-            checkpoint_file = self.save_checkpoint(discovery_state, "discovery_complete")
+            checkpoint_file = self.save_checkpoint(
+                discovery_state, "discovery_complete"
+            )
             discovery_state["checkpoint_file"] = checkpoint_file
 
             print("\n" + "=" * 80)
@@ -1279,10 +1422,12 @@ class CompanyResearcher:
 
             logger.info("Company discovery completed")
             return discovery_state
-            
+
         except asyncio.TimeoutError:
             logger.error("Company discovery phase timed out after 4 minutes")
-            raise Exception("Discovery phase timeout - please retry with a more specific query")
+            raise Exception(
+                "Discovery phase timeout - please retry with a more specific query"
+            )
 
     async def continue_with_company_info(
         self, state: Dict[str, Any], user_modified_companies: List[Company] = None
@@ -1317,9 +1462,9 @@ class CompanyResearcher:
             # Add timeout for the final processing phase
             final_state = await asyncio.wait_for(
                 compiled_workflow.ainvoke(state),
-                timeout=240.0  # 4 minutes for info gathering and synthesis
+                timeout=240.0,  # 4 minutes for info gathering and synthesis
             )
-            
+
             # Save final checkpoint
             self.save_checkpoint(final_state, "research_complete")
 
@@ -1329,107 +1474,63 @@ class CompanyResearcher:
 
             logger.info("Complete company research workflow completed")
             return final_state
-            
+
         except asyncio.TimeoutError:
             logger.error("Company info gathering phase timed out after 4 minutes")
             # Save partial results checkpoint
             self.save_checkpoint(state, "partial_results")
-            raise Exception("Info gathering timeout - partial results saved to checkpoint")
+            raise Exception(
+                "Info gathering timeout - partial results saved to checkpoint"
+            )
 
     def save_company_research(self, state: Dict[str, Any], filename: str) -> None:
-        """Save company research results (disabled in serverless environments)"""
-        # Skip file saving in Vercel/serverless environments (read-only filesystem)
-        if os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'):
-            logger.info(f"Skipping research save in serverless environment: {filename}")
-            return
-            
-        try:
-            companies_data = []
-            for company in state.get("companies_list", []):
-                companies_data.append(
-                    {
-                        "name": company.name,
-                        "description": company.description,
-                        "reasoning": company.reasoning,
-                        "year_established": company.year_established,
-                        "still_in_business": company.still_in_business,
-                        "history": company.history,
-                        "future_roadmap": company.future_roadmap,
-                    }
-                )
+        """Save company research results (disabled - files only available through UI download)"""
+        # File saving is disabled - research results are only available through UI download
+        logger.info(
+            f"File saving disabled - research results available only through UI download: {filename}"
+        )
+        return
 
-            research_data = {
-                "query": state["original_query"],
-                "market_topic": state["market_topic"],
-                "timestamp": datetime.now().isoformat(),
-                "companies": companies_data,
-                "company_pages": state.get("final_company_pages", {}),
-                "total_companies": len(companies_data),
-            }
-
-            with open(filename, "w", encoding="utf-8") as f:
-                json.dump(research_data, f, indent=2, ensure_ascii=False)
-
-            logger.info(f"Company research saved to {filename}")
-        except OSError as e:
-            logger.warning(f"Failed to save research results (read-only filesystem): {e}")
-    
     def save_checkpoint(self, state: Dict[str, Any], step: str) -> str:
-        """Save checkpoint for resume capability (disabled in serverless environments)"""
-        # Skip checkpoint saving in Vercel/serverless environments (read-only filesystem)
-        if os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'):
-            logger.info(f"Skipping checkpoint save in serverless environment: {step}")
-            return f"checkpoint_{step}_serverless"
-            
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        checkpoint_filename = f"checkpoint_{step}_{timestamp}.json"
-        
-        try:
-            checkpoint_data = {
-                "step": step,
-                "timestamp": datetime.now().isoformat(),
-                "state": self._serialize_state(state)
-            }
-            
-            with open(checkpoint_filename, "w", encoding="utf-8") as f:
-                json.dump(checkpoint_data, f, indent=2, ensure_ascii=False)
-                
-            logger.info(f"Checkpoint saved: {checkpoint_filename}")
-            return checkpoint_filename
-        except OSError as e:
-            logger.warning(f"Failed to save checkpoint (read-only filesystem): {e}")
-            return f"checkpoint_{step}_failed"
-    
+        """Save checkpoint for resume capability (disabled - no file saving)"""
+        # Checkpoint saving is disabled - no files are saved to repository
+        logger.info(
+            f"Checkpoint saving disabled - no files saved to repository: {step}"
+        )
+        return f"checkpoint_{step}_disabled"
+
     def load_checkpoint(self, checkpoint_file: str) -> Dict[str, Any]:
         """Load checkpoint to resume processing"""
         try:
             with open(checkpoint_file, "r", encoding="utf-8") as f:
                 checkpoint_data = json.load(f)
-            
-            logger.info(f"Loaded checkpoint from {checkpoint_data['step']} at {checkpoint_data['timestamp']}")
+
+            logger.info(
+                f"Loaded checkpoint from {checkpoint_data['step']} at {checkpoint_data['timestamp']}"
+            )
             return self._deserialize_state(checkpoint_data["state"])
-            
+
         except Exception as e:
             logger.error(f"Error loading checkpoint: {e}")
             return None
-    
+
     def _serialize_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Serialize state for checkpoint storage"""
         serialized = state.copy()
-        
+
         # Convert Company objects to dictionaries
         if "companies_list" in serialized:
             serialized["companies_list"] = [
                 company.__dict__ if hasattr(company, "__dict__") else company
                 for company in serialized["companies_list"]
             ]
-        
+
         if "user_modified_companies" in serialized:
             serialized["user_modified_companies"] = [
                 company.__dict__ if hasattr(company, "__dict__") else company
                 for company in serialized["user_modified_companies"]
             ]
-            
+
         # Convert SearchResult objects to dictionaries
         for key in ["company_discovery_tavily", "company_discovery_firecrawl"]:
             if key in serialized:
@@ -1437,7 +1538,7 @@ class CompanyResearcher:
                     result.__dict__ if hasattr(result, "__dict__") else result
                     for result in serialized[key]
                 ]
-        
+
         # Handle detailed_company_info
         if "detailed_company_info" in serialized:
             for company_name, results in serialized["detailed_company_info"].items():
@@ -1445,26 +1546,38 @@ class CompanyResearcher:
                     result.__dict__ if hasattr(result, "__dict__") else result
                     for result in results
                 ]
-        
+
+        # Handle messages (convert to string representations to avoid JSON serialization issues)
+        if "messages" in serialized:
+            serialized["messages"] = [
+                {
+                    "type": msg.__class__.__name__,
+                    "content": (
+                        str(msg.content) if hasattr(msg, "content") else str(msg)
+                    ),
+                }
+                for msg in serialized["messages"]
+            ]
+
         return serialized
-    
+
     def _deserialize_state(self, serialized_state: Dict[str, Any]) -> Dict[str, Any]:
         """Deserialize state from checkpoint"""
         state = serialized_state.copy()
-        
+
         # Convert dictionaries back to Company objects
         if "companies_list" in state:
             state["companies_list"] = [
                 Company(**company) if isinstance(company, dict) else company
                 for company in state["companies_list"]
             ]
-        
+
         if "user_modified_companies" in state:
             state["user_modified_companies"] = [
                 Company(**company) if isinstance(company, dict) else company
                 for company in state["user_modified_companies"]
             ]
-            
+
         # Convert dictionaries back to SearchResult objects
         for key in ["company_discovery_tavily", "company_discovery_firecrawl"]:
             if key in state:
@@ -1472,7 +1585,7 @@ class CompanyResearcher:
                     SearchResult(**result) if isinstance(result, dict) else result
                     for result in state[key]
                 ]
-        
+
         # Handle detailed_company_info
         if "detailed_company_info" in state:
             for company_name, results in state["detailed_company_info"].items():
@@ -1480,65 +1593,240 @@ class CompanyResearcher:
                     SearchResult(**result) if isinstance(result, dict) else result
                     for result in results
                 ]
-        
+
         return state
 
 
 async def main():
+    import sys
+    import json
+
+    print("🚀 Starting AI Research System", flush=True)
+    print(f"⚙️  Python version: {sys.version}", flush=True)
+    print(f"📋 Command line arguments: {sys.argv}", flush=True)
+
     # Import and use config
     from config import Config
 
+    print("🔧 Loading configuration...", flush=True)
     # Validate configuration
     config_status = Config.validate_config()
     if not config_status["valid"]:
+        print(
+            f"❌ Configuration validation failed: {config_status['issues']}", flush=True
+        )
         logger.error(f"Configuration issues: {config_status['issues']}")
-        return
+        raise Exception(f"Configuration validation failed: {config_status['issues']}")
+
+    print("✅ Configuration validated successfully", flush=True)
+    print(
+        f"🔑 API Keys configured: OpenAI={bool(Config.OPENAI_API_KEY)}, Tavily={bool(Config.TAVILY_API_KEY)}, Firecrawl={bool(Config.FIRECRAWL_API_KEY)}",
+        flush=True,
+    )
 
     # Create Company researcher
+    print("🏗️  Initializing Company Researcher...", flush=True)
     researcher = CompanyResearcher(
         openai_api_key=Config.OPENAI_API_KEY,
         tavily_api_key=Config.TAVILY_API_KEY,
         firecrawl_api_key=Config.FIRECRAWL_API_KEY,
         model="gpt-4o",
     )
+    print("✅ Company Researcher initialized", flush=True)
 
-    # Conduct company research
-    query = "ride sharing market like Uber"
-    discovery_state = await researcher.conduct_company_research(query)
+    # Check command line arguments
+    print(f"🔍 Parsing command line arguments (total: {len(sys.argv)})", flush=True)
+    if len(sys.argv) < 2:
+        print("❌ Insufficient arguments provided", flush=True)
+        raise Exception(
+            "Usage: python research_system.py <query> or python research_system.py --company-info <data>"
+        )
 
-    # Print company discovery results
-    print("=" * 80)
-    print("MARKET/TOPIC IDENTIFIED")
-    print("=" * 80)
-    print(discovery_state["market_topic"])
+    mode = sys.argv[1]
+    print(f"🎯 Detected mode: {mode}", flush=True)
 
-    print("\n" + "=" * 80)
-    print("COMPANIES FOUND")
-    print("=" * 80)
-    companies = discovery_state["companies_list"]
-    for i, company in enumerate(companies, 1):
-        print(f"{i}. {company.name}")
-        print(f"   Description: {company.description}")
-        print(f"   Reasoning: {company.reasoning}")
-        print()
+    if mode == "--company-info":
+        print("🏢 Starting Company Info Research Mode", flush=True)
+        if len(sys.argv) < 3:
+            print("❌ Company info mode requires data argument", flush=True)
+            raise Exception("Company info mode requires data argument")
 
-    # Simulate user continuing with all companies (in real app, user would modify the list)
-    print("=" * 80)
-    print("CONTINUING WITH DETAILED COMPANY INFO...")
-    print("=" * 80)
+        # Handle company info research
+        try:
+            print("📊 Parsing company info data...", flush=True)
+            data = json.loads(sys.argv[2])
+            state = data.get("state")
+            user_companies = data.get("user_companies")
 
-    final_state = await researcher.continue_with_company_info(discovery_state)
+            print(
+                f"📋 Received state keys: {list(state.keys()) if state else 'None'}",
+                flush=True,
+            )
+            print(
+                f"🏭 Number of companies to research: {len(user_companies) if user_companies else 0}",
+                flush=True,
+            )
 
-    # Print final results
-    print("\n" + "=" * 80)
-    print("COMPANY PAGES CREATED")
-    print("=" * 80)
-    for company_name, page_content in final_state["final_company_pages"].items():
-        print(f"\n--- {company_name} ---")
-        print(page_content[:500] + "..." if len(page_content) > 500 else page_content)
+            if not state or not user_companies:
+                print("❌ Invalid company info data format", flush=True)
+                raise Exception("Invalid company info data format")
 
-    # Save research
-    researcher.save_company_research(final_state, "company_research_output.json")
+            # Convert to Company objects if needed
+            companies = []
+            print("🔄 Converting companies to internal format...", flush=True)
+            for i, comp in enumerate(user_companies):
+                if isinstance(comp, dict):
+                    company = Company(
+                        name=comp.get("name", ""),
+                        description=comp.get("description", ""),
+                        reasoning=comp.get("reasoning", ""),
+                    )
+                    companies.append(company)
+                    print(f"  ✅ Company {i+1}: {company.name}", flush=True)
+                else:
+                    companies.append(comp)
+                    print(
+                        f"  ✅ Company {i+1}: {comp.name if hasattr(comp, 'name') else 'Unknown'}",
+                        flush=True,
+                    )
+
+            # Continue with company info gathering
+            print("🏗️  Building research state...", flush=True)
+            state_dict = {
+                "user_modified_companies": companies,
+                "companies_list": companies,
+                "market_topic": state.get("market_topic", ""),
+                "original_query": state.get("query", ""),
+                "messages": [],
+                "company_discovery_tavily": state.get("company_discovery_tavily", []),
+                "company_discovery_firecrawl": state.get(
+                    "company_discovery_firecrawl", []
+                ),
+                "detailed_company_info": {},
+                "final_company_pages": {},
+                "current_step": "company_info_gathering",
+                "awaiting_user_input": False,
+            }
+
+            print(f"🎯 Market topic: {state_dict['market_topic']}", flush=True)
+            print(f"🔍 Original query: {state_dict['original_query']}", flush=True)
+            print(
+                f"📊 Tavily raw data: {len(state_dict['company_discovery_tavily'])} results",
+                flush=True,
+            )
+            print(
+                f"🕷️  Firecrawl raw data: {len(state_dict['company_discovery_firecrawl'])} results",
+                flush=True,
+            )
+            print("🚀 Starting detailed company research...", flush=True)
+
+            final_state = await researcher.continue_with_company_info(state_dict)
+
+            print("✅ Company research completed successfully", flush=True)
+            print(
+                f"📄 Generated pages for {len(final_state.get('final_company_pages', {}))} companies",
+                flush=True,
+            )
+
+            # Output final result as JSON
+            result = {
+                "type": "complete",
+                "data": {
+                    "query": state.get("query"),
+                    "market_topic": state.get("market_topic"),
+                    "company_pages": final_state.get("final_company_pages", {}),
+                    "total_companies": len(companies),
+                    "timestamp": datetime.now().isoformat(),
+                    "company_discovery_tavily": [
+                        res.__dict__
+                        for res in final_state.get("company_discovery_tavily", [])
+                    ],
+                    "company_discovery_firecrawl": [
+                        res.__dict__
+                        for res in final_state.get("company_discovery_firecrawl", [])
+                    ],
+                },
+            }
+            print("📤 Sending final result to UI...", flush=True)
+            print(json.dumps(result))
+
+        except Exception as e:
+            print(f"❌ Company info research failed: {str(e)}", flush=True)
+            error_result = {
+                "type": "error",
+                "data": {
+                    "message": f"Company info research failed: {str(e)}",
+                    "timestamp": datetime.now().isoformat(),
+                },
+            }
+            print(json.dumps(error_result))
+            raise
+    else:
+        # Handle regular company discovery
+        query = mode  # First argument is the query
+        print(f"🔍 Starting Company Discovery Mode for query: '{query}'", flush=True)
+
+        try:
+            print("🎯 Initiating company research workflow...", flush=True)
+            discovery_state = await researcher.conduct_company_research(query)
+
+            print("✅ Company discovery completed successfully", flush=True)
+
+            # Output discovery result as JSON
+            companies = discovery_state["companies_list"]
+            tavily_count = len(discovery_state.get("company_discovery_tavily", []))
+            firecrawl_count = len(
+                discovery_state.get("company_discovery_firecrawl", [])
+            )
+
+            print(f"📊 Discovery Results Summary:", flush=True)
+            print(f"  🏢 Companies found: {len(companies)}", flush=True)
+            print(f"  🔍 Tavily sources: {tavily_count}", flush=True)
+            print(f"  🕷️  Firecrawl sources: {firecrawl_count}", flush=True)
+            print(f"  📋 Market topic: {discovery_state['market_topic']}", flush=True)
+
+            for i, company in enumerate(companies, 1):
+                print(
+                    f"    {i}. {company.name}: {company.description[:60]}...",
+                    flush=True,
+                )
+
+            result = {
+                "type": "company_discovery",
+                "data": {
+                    "query": query,
+                    "market_topic": discovery_state["market_topic"],
+                    "companies": [
+                        {
+                            "name": company.name,
+                            "description": company.description,
+                            "reasoning": company.reasoning,
+                        }
+                        for company in companies
+                    ],
+                    "total_companies": len(companies),
+                    "tavily_source_count": tavily_count,
+                    "firecrawl_source_count": firecrawl_count,
+                    "total_sources": tavily_count + firecrawl_count,
+                    "timestamp": datetime.now().isoformat(),
+                    "awaiting_user_input": True,
+                    "step": "company_review",
+                },
+            }
+            print("📤 Sending discovery result to UI...", flush=True)
+            print(json.dumps(result))
+
+        except Exception as e:
+            print(f"❌ Company research failed: {str(e)}", flush=True)
+            error_result = {
+                "type": "error",
+                "data": {
+                    "message": f"Company research failed: {str(e)}",
+                    "timestamp": datetime.now().isoformat(),
+                },
+            }
+            print(json.dumps(error_result))
+            raise
 
 
 if __name__ == "__main__":

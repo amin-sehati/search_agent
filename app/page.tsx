@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Search, Clock, CheckCircle, AlertCircle, Download, RotateCcw, Plus, Trash2 } from 'lucide-react'
+import { useState } from 'react'
+import { Search, Clock, CheckCircle, AlertCircle, Download, RotateCcw } from 'lucide-react'
 
 interface ProgressEvent {
   timestamp: string
@@ -33,7 +33,6 @@ interface CompanyDiscoveryResult {
   awaiting_user_input: boolean
   step: string
 }
-
 interface CompanyResearchResult {
   query: string
   market_topic: string
@@ -79,7 +78,9 @@ export default function Home() {
   const [researchState, setResearchState] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('companies')
-
+  const [companyProfileProgress, setCompanyProfileProgress] = useState(0)
+  const [companyProfileStep, setCompanyProfileStep] = useState('')
+  const [companyProfileEvents, setCompanyProfileEvents] = useState<ProgressEvent[]>([])
   const startResearch = async () => {
     if (!query.trim()) return
 
@@ -134,8 +135,8 @@ export default function Home() {
                 setCompanyDiscovery(discoveryData)
                 setCompanies(discoveryData.companies)
                 setResearchState(eventData.data)
-                setProgress(50)
-                setCurrentStep('Company Review')
+                setProgress(100)
+                setCurrentStep('Company Search Complete')
               } else if (eventData.type === 'complete' && eventData.data) {
                 if (eventData.data.company_pages) {
                   setCompanyResult(eventData.data as CompanyResearchResult)
@@ -173,6 +174,9 @@ export default function Home() {
     setProgressEvents([])
     setIsGatheringInfo(false)
     setActiveTab('companies')
+    setCompanyProfileProgress(0)
+    setCompanyProfileStep('')
+    setCompanyProfileEvents([])
   }
 
   const saveResearch = () => {
@@ -193,9 +197,9 @@ export default function Home() {
     if (!researchState || companies.length === 0) return
 
     setIsGatheringInfo(true)
-    setProgress(50)
-    setCurrentStep('')
-    setProgressEvents([])
+    setCompanyProfileProgress(0)
+    setCompanyProfileStep('')
+    setCompanyProfileEvents([])
     setError(null)
 
     try {
@@ -237,13 +241,13 @@ export default function Home() {
               
               if (eventData.type === 'progress' && eventData.data) {
                 const progressData = eventData.data as ProgressEvent
-                setProgress(50 + (progressData.progress / 2))
-                setCurrentStep(progressData.step)
-                setProgressEvents(prev => [...prev, progressData])
+                setCompanyProfileProgress(progressData.progress)
+                setCompanyProfileStep(progressData.step)
+                setCompanyProfileEvents(prev => [...prev, progressData])
               } else if (eventData.type === 'complete' && eventData.data) {
                 setCompanyResult(eventData.data as CompanyResearchResult)
-                setProgress(100)
-                setCurrentStep('Complete')
+                setCompanyProfileProgress(100)
+                setCompanyProfileStep('Complete')
               } else if (eventData.type === 'error') {
                 setError(eventData.error || 'Unknown error occurred')
               }
@@ -279,15 +283,51 @@ export default function Home() {
   }
 
   const renderMarkdown = (text: string) => {
-    return text
-      .replace(/^### (.*$)/gim, '<h3 class="text-lg font-medium mb-2">$1</h3>')
-      .replace(/^## (.*$)/gim, '<h2 class="text-xl font-semibold mb-3">$1</h2>')
-      .replace(/^# (.*$)/gim, '<h1 class="text-2xl font-bold mb-4">$1</h1>')
-      .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
-      .replace(/\[(\d+)\]/g, '<sup class="text-blue-600">[$1]</sup>')
-      .replace(/\n\n/g, '</p><p class="mb-4">')
-      .replace(/\n/g, '<br>')
+    if (!text) return ''
+    
+    let html = text
+
+    // Remove fenced code block markers (e.g., ``` or ```markdown)
+    html = html.replace(/^```[\s\w]*$/gm, '')
+    
+    // Handle headers (must be at start of line)
+    html = html.replace(/^# (.+)$/gm, '<h1 class="text-2xl font-bold mb-4 mt-6 text-gray-900">$1</h1>')
+    html = html.replace(/^## (.+)$/gm, '<h2 class="text-xl font-semibold mb-3 mt-5 text-gray-900">$1</h2>')
+    html = html.replace(/^### (.+)$/gm, '<h3 class="text-lg font-semibold mb-2 mt-4 text-gray-900">$1</h3>')
+    
+    // Handle bold and italic
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-gray-900">$1</strong>')
+    html = html.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em class="italic">$1</em>')
+    
+    // Handle unordered lists
+    html = html.replace(/^[-*+] (.+)$/gm, '<li class="ml-6 mb-1 text-gray-800">• $1</li>')
+    
+    // Handle ordered lists  
+    html = html.replace(/^\d+\. (.+)$/gm, '<li class="ml-6 mb-1 text-gray-800 list-decimal">$1</li>')
+    
+    // Handle citations/references
+    html = html.replace(/\[(\d+)\]/g, '<sup class="text-blue-600 text-xs">[$1]</sup>')
+    
+    // Handle code blocks
+    html = html.replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono">$1</code>')
+    
+    // Handle emoji status indicators
+    html = html.replace(/❌/g, '<span class="text-red-600">❌</span>')
+    html = html.replace(/✅/g, '<span class="text-green-600">✅</span>')
+    
+    // Convert line breaks and paragraphs
+    html = html.replace(/\n\n+/g, '</p><p class="mb-4 text-gray-800">')
+    html = html.replace(/\n/g, '<br>')
+    
+    // Wrap content in a paragraph only if it doesn't already start with a block element
+    if (!html.match(/^<(h[1-6]|div|p|ul|ol|li)/)) {
+      html = `<p class="mb-4 text-gray-800">${html}</p>`
+    }
+    
+    // Clean up any empty paragraphs
+    html = html.replace(/<p[^>]*><\/p>/g, '')
+    
+    return html
   }
 
   return (
@@ -308,7 +348,7 @@ export default function Home() {
               id="query"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="e.g., Companies like Uber that failed in the past and died"
+              placeholder="e.g., Ride sharing companies that are for luxury and VIP"
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
               rows={3}
               disabled={isResearching}
@@ -346,11 +386,11 @@ export default function Home() {
       </div>
 
       {/* Progress Section */}
-      {(isResearching || isGatheringInfo || progressEvents.length > 0) && (
+      {(isResearching || progressEvents.length > 0) && (
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
           <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 text-black">
             <Clock className="w-5 h-5" />
-            Research Progress
+            Company Discovery Progress
           </h2>
           
           {/* Progress Bar */}
@@ -372,6 +412,40 @@ export default function Home() {
             {progressEvents.map((event, index) => (
               <div key={index} className="flex items-start gap-2 text-sm text-black mb-1">
                 <span className="text-blue-600 font-mono">[{event.timestamp}]</span>
+                <span>{event.message}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Company Profile Progress Section */}
+      {(isGatheringInfo || companyProfileEvents.length > 0) && (
+        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+          <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 text-black">
+            <Clock className="w-5 h-5" />
+            Company Profile Creation Progress
+          </h2>
+          
+          {/* Progress Bar */}
+          <div className="mb-4">
+            <div className="flex justify-between text-sm text-black mb-1">
+              <span>{companyProfileStep}</span>
+              <span>{Math.round(companyProfileProgress)}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div
+                className="bg-purple-600 h-2 rounded-full transition-all duration-500"
+                style={{ width: `${companyProfileProgress}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Progress Events */}
+          <div className="max-h-48 overflow-y-auto">
+            {companyProfileEvents.map((event, index) => (
+              <div key={index} className="flex items-start gap-2 text-sm text-black mb-1">
+                <span className="text-purple-600 font-mono">[{event.timestamp}]</span>
                 <span>{event.message}</span>
               </div>
             ))}
@@ -492,9 +566,9 @@ export default function Home() {
                 {Object.entries(companyResult.company_pages).map(([companyName, pageContent]) => (
                   <div key={companyName} className="border border-gray-200 rounded-lg p-6">
                     <div
-                      className="markdown-content"
+                      className="markdown-content max-w-none"
                       dangerouslySetInnerHTML={{
-                        __html: `<p class="mb-4">${renderMarkdown(pageContent)}</p>`
+                        __html: renderMarkdown(pageContent)
                       }}
                     />
                   </div>
@@ -557,9 +631,9 @@ export default function Home() {
               <div>
                 <h2 className="text-xl font-semibold mb-4 text-black">Research Summary</h2>
                 <div
-                  className="markdown-content"
+                  className="markdown-content max-w-none"
                   dangerouslySetInnerHTML={{
-                    __html: `<p class="mb-4">${renderMarkdown(result.summary)}</p>`
+                    __html: renderMarkdown(result.summary)
                   }}
                 />
               </div>
@@ -569,9 +643,9 @@ export default function Home() {
               <div>
                 <h2 className="text-xl font-semibold mb-4 text-black">Full Research Report</h2>
                 <div
-                  className="markdown-content"
+                  className="markdown-content max-w-none"
                   dangerouslySetInnerHTML={{
-                    __html: `<p class="mb-4">${renderMarkdown(result.report)}</p>`
+                    __html: renderMarkdown(result.report)
                   }}
                 />
               </div>

@@ -135,6 +135,9 @@ async def start_research(request: ResearchRequest):
             "companies": serialized_companies,
             "total_companies": len(serialized_companies),
             "timestamp": datetime.now().isoformat(),
+            "tavily_source_count": result.get("tavily_source_count", 0),
+            "firecrawl_source_count": result.get("firecrawl_source_count", 0),
+            "total_sources": result.get("total_sources", 0),
         }
 
         return response_data
@@ -206,7 +209,10 @@ async def stream_research(request: ResearchRequest):
                 "total_companies": len(serialized_companies),
                 "timestamp": datetime.now().isoformat(),
                 "awaiting_user_input": True,
-                "step": "company_review"
+                "step": "company_review",
+                "tavily_source_count": result.get("tavily_source_count", 0),
+                "firecrawl_source_count": result.get("firecrawl_source_count", 0),
+                "total_sources": result.get("total_sources", 0),
             }
 
             yield f"data: {json.dumps({'type': 'company_discovery', 'data': final_data})}\n\n"

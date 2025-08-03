@@ -171,6 +171,10 @@ class handler(BaseHTTPRequestHandler):
                     )
                     self.wfile.flush()
 
+            # Serialize SearchResult objects
+            def serialize_search_results(results):
+                return [res.__dict__ for res in results]
+
             # Send final result with company pages
             final_data = {
                 "query": final_result["original_query"],
@@ -178,6 +182,8 @@ class handler(BaseHTTPRequestHandler):
                 "company_pages": final_result.get("final_company_pages", {}),
                 "total_companies": len(final_result.get("final_company_pages", {})),
                 "timestamp": datetime.now().isoformat(),
+                "company_discovery_tavily": serialize_search_results(final_result.get("company_discovery_tavily", [])),
+                "company_discovery_firecrawl": serialize_search_results(final_result.get("company_discovery_firecrawl", [])),
             }
 
             self.wfile.write(

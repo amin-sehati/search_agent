@@ -3,13 +3,27 @@ import { spawn } from 'child_process'
 import path from 'path'
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now()
+  const requestId = Math.random().toString(36).substring(7)
+  
+  console.log(`🌐 [${requestId}] API Request received: /api/research/stream`)
+  console.log(`📋 [${requestId}] Request timestamp: ${new Date().toISOString()}`)
+  
   try {
+    console.log(`📖 [${requestId}] Parsing request body...`)
     const body = await request.json()
     const { query } = body
+    
+    console.log(`🔍 [${requestId}] Query received: "${query}"`)
+    console.log(`📊 [${requestId}] Request body size: ${JSON.stringify(body).length} characters`)
 
     if (!query) {
+      console.log(`❌ [${requestId}] Query validation failed: empty query`)
       return new Response('Query is required', { status: 400 })
     }
+    
+    console.log(`✅ [${requestId}] Query validation passed`)
+    console.log(`🚀 [${requestId}] Starting Python research process...`)
 
     // Create a readable stream for Server-Sent Events
     const encoder = new TextEncoder()
@@ -29,74 +43,88 @@ export async function POST(request: NextRequest) {
         
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(initialEvent)}\n\n`))
 
-        // Simulate the company research workflow
-        setTimeout(() => {
-          // Step 1: User input processing
-          const step1Event = {
-            type: 'progress',
-            data: {
-              timestamp: new Date().toLocaleTimeString(),
-              step: 'User Input',
-              message: '🎯 Processing market/topic query...',
-              progress: 15
+        // Run actual Python research system
+        const pythonScript = path.join(process.cwd(), 'research_system.py')
+        console.log(`🐍 [${requestId}] Python script path: ${pythonScript}`)
+        console.log(`🔧 [${requestId}] Spawning Python process with args: ['python3', '${pythonScript}', '${query}']`)
+        
+        const pythonProcess = spawn('python3', [pythonScript, query], {
+          env: { ...process.env },
+          stdio: ['ignore', 'pipe', 'pipe']
+        })
+
+        console.log(`🆔 [${requestId}] Python process PID: ${pythonProcess.pid}`)
+
+        let buffer = ''
+        let hasStarted = false
+        let lineCount = 0
+
+        pythonProcess.stdout.on('data', (data) => {
+          const dataStr = data.toString()
+          console.log(`📤 [${requestId}] Python stdout (${dataStr.length} bytes):`, dataStr.slice(0, 200) + (dataStr.length > 200 ? '...' : ''))
+          
+          buffer += dataStr
+          
+          // Process complete lines
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || '' // Keep incomplete line in buffer
+          
+          for (const line of lines) {
+            lineCount++
+            if (line.trim()) {
+              try {
+                const event = JSON.parse(line)
+                console.log(`🎯 [${requestId}] JSON event (line ${lineCount}):`, event.type, event.data ? Object.keys(event.data) : 'no data')
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
+                hasStarted = true
+              } catch (e) {
+                // Log non-JSON output
+                console.log(`📋 [${requestId}] Python output (line ${lineCount}):`, line)
+              }
             }
           }
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(step1Event)}\n\n`))
+        })
+
+        pythonProcess.stderr.on('data', (data) => {
+          const errorStr = data.toString()
+          console.error(`❌ [${requestId}] Python stderr:`, errorStr)
+        })
+
+        pythonProcess.on('close', (code) => {
+          const duration = Date.now() - startTime
+          console.log(`🏁 [${requestId}] Python process closed with code: ${code} (duration: ${duration}ms)`)
           
-          setTimeout(() => {
-            // Step 2: Company discovery
-            const step2Event = {
-              type: 'progress',
+          if (code !== 0 && !hasStarted) {
+            console.log(`💥 [${requestId}] Process failed to start, sending error event`)
+            const errorEvent = {
+              type: 'error',
               data: {
-                timestamp: new Date().toLocaleTimeString(),
-                step: 'Company Discovery',
-                message: '🔍 Searching for companies in the market...',
-                progress: 35
+                message: 'Research system failed to start',
+                timestamp: new Date().toISOString()
               }
             }
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify(step2Event)}\n\n`))
-            
-            setTimeout(() => {
-              // Step 3: Company list ready
-              const step3Event = {
-                type: 'progress',
-                data: {
-                  timestamp: new Date().toLocaleTimeString(),
-                  step: 'Company List',
-                  message: '📋 Creating company list...',
-                  progress: 50
-                }
-              }
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify(step3Event)}\n\n`))
-              
-              setTimeout(() => {
-                // Send mock company discovery result
-                const discoveryResult = {
-                  type: 'company_discovery',
-                  data: {
-                    query: query,
-                    market_topic: extractMarketTopic(query),
-                    companies: generateMockCompanies(query),
-                    total_companies: 5,
-                    tavily_source_count: 3,
-                    firecrawl_source_count: 7,
-                    total_sources: 8,
-                    timestamp: new Date().toISOString(),
-                    awaiting_user_input: true,
-                    step: 'company_review'
-                  }
-                }
-                
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify(discoveryResult)}\n\n`))
-                controller.close()
-                
-              }, 1000)
-            }, 1500)
-          }, 1000)
-        }, 500)
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`))
+          }
+          console.log(`🔚 [${requestId}] Closing SSE stream`)
+          controller.close()
+        })
+
+        pythonProcess.on('error', (error) => {
+          console.error(`💥 [${requestId}] Python process error:`, error.message)
+          const errorEvent = {
+            type: 'error',
+            data: {
+              message: `Failed to start research system: ${error.message}`,
+              timestamp: new Date().toISOString()
+            }
+          }
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`))
+          controller.close()
+        })
       }
     })
 
+    console.log(`🌊 [${requestId}] Returning SSE stream response`)
     return new Response(readable, {
       headers: {
         'Content-Type': 'text/event-stream',
@@ -105,7 +133,8 @@ export async function POST(request: NextRequest) {
       },
     })
   } catch (error) {
-    console.error('Stream API error:', error)
+    const duration = Date.now() - startTime
+    console.error(`💥 [${requestId}] Stream API error (duration: ${duration}ms):`, error)
     
     return new Response(
       JSON.stringify({ error: 'Internal server error' }),
@@ -117,83 +146,3 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function extractMarketTopic(query: string): string {
-  // Simple market topic extraction logic
-  if (query.toLowerCase().includes('uber') || query.toLowerCase().includes('ride') || query.toLowerCase().includes('sharing')) {
-    return 'ride-sharing and transportation market'
-  }
-  if (query.toLowerCase().includes('food') || query.toLowerCase().includes('delivery')) {
-    return 'food delivery market'
-  }
-  if (query.toLowerCase().includes('social') || query.toLowerCase().includes('media')) {
-    return 'social media market'
-  }
-  if (query.toLowerCase().includes('fintech') || query.toLowerCase().includes('finance')) {
-    return 'fintech market'
-  }
-  
-  return `${query} market`
-}
-
-function generateMockCompanies(query: string): Array<{name: string, description: string, reasoning: string}> {
-  const lowerQuery = query.toLowerCase()
-  
-  if (lowerQuery.includes('uber') || lowerQuery.includes('ride') || lowerQuery.includes('sharing')) {
-    return [
-      {
-        name: 'Lyft',
-        description: 'Ride-sharing platform connecting drivers with passengers',
-        reasoning: 'Direct competitor to Uber in the ride-sharing market with similar business model'
-      },
-      {
-        name: 'Sidecar',
-        description: 'Former ride-sharing company that shut down in 2015',
-        reasoning: 'Early ride-sharing company that failed to compete with Uber and Lyft'
-      },
-      {
-        name: 'Haxi',
-        description: 'Brazilian ride-sharing app',
-        reasoning: 'Regional ride-sharing competitor that operated in Brazil'
-      },
-      {
-        name: 'Juno',
-        description: 'Ride-sharing service that was acquired by Gett',
-        reasoning: 'NYC-focused ride-sharing company that tried to compete with Uber'
-      },
-      {
-        name: 'Via',
-        description: 'Shared ride service focusing on carpooling',
-        reasoning: 'Ride-sharing company focusing on shared rides and carpooling solutions'
-      }
-    ]
-  }
-  
-  // Default mock companies for other queries
-  return [
-    {
-      name: 'Company Alpha',
-      description: 'Innovative startup in the specified market',
-      reasoning: 'Operates directly in the market mentioned in the query'
-    },
-    {
-      name: 'Beta Solutions',
-      description: 'Enterprise solution provider',
-      reasoning: 'Provides solutions for businesses in this market sector'
-    },
-    {
-      name: 'Gamma Technologies',
-      description: 'Tech company with focus on this market',
-      reasoning: 'Technology-focused company serving this specific market'
-    },
-    {
-      name: 'Delta Ventures',
-      description: 'Failed startup that shut down in 2020',
-      reasoning: 'Former company that attempted to capture market share but failed'
-    },
-    {
-      name: 'Epsilon Corp',
-      description: 'Established company in this space',
-      reasoning: 'Long-standing player in this market with proven track record'
-    }
-  ]
-}

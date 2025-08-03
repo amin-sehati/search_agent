@@ -55,6 +55,7 @@ MANIFEST
 
 # Research outputs
 research_output*.json
+checkpoint_*.json
 *.pdf
 
 # IDE
