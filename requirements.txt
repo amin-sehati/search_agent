@@ -1,17 +1,17 @@
 # AI libraries  
-langchain>=0.1.0
-langchain-cerebras>=0.1.0
-langgraph>=0.0.20
+langchain
+langchain-cerebras
+langgraph
 
 # Data validation and processing
-pydantic>=2.5.0
+pydantic
 
 # Search and crawling APIs
-tavily-python>=0.3.0
-firecrawl>=2.5.0
+tavily-python
+firecrawl
 
 # HTTP client
-requests>=2.31.0
+requests
 
 # Environment and configuration
-python-dotenv>=1.0.0
+python-dotenv
