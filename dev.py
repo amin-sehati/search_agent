@@ -5,39 +5,27 @@ Development server runner for AI Research Assistant
 import subprocess
 import sys
 import os
-import time
-import signal
-from threading import Thread
 
-def run_fastapi():
-    """Run the FastAPI backend server"""
-    os.chdir(os.path.join(os.path.dirname(__file__), 'api'))
-    subprocess.run([sys.executable, 'main.py'])
-
-def run_nextjs():
-    """Run the Next.js frontend server"""
-    os.chdir(os.path.dirname(__file__))
-    subprocess.run(['npm', 'run', 'dev'])
 
 def main():
-    print("🚀 Starting AI Research Assistant Development Servers...")
-    print("📊 FastAPI Backend: http://localhost:8000")
-    print("🌐 Next.js Frontend: http://localhost:3000")
-    print("Press Ctrl+C to stop both servers\n")
-    
-    # Start FastAPI in a separate thread
-    fastapi_thread = Thread(target=run_fastapi, daemon=True)
-    fastapi_thread.start()
-    
-    # Give FastAPI time to start
-    time.sleep(2)
-    
+    print("🚀 Starting AI Research Assistant Development Server...")
+    print("🌐 Next.js Application: http://localhost:3000")
+    print("Press Ctrl+C to stop the server\n")
+
+    # Ensure we're in the correct directory
+    os.chdir(os.path.dirname(__file__))
+
     try:
-        # Start Next.js in main thread
-        run_nextjs()
+        # Start Next.js development server
+        subprocess.run(["npm", "run", "dev"])
     except KeyboardInterrupt:
-        print("\n🛑 Shutting down servers...")
+        print("\n🛑 Shutting down server...")
         sys.exit(0)
+    except FileNotFoundError:
+        print("❌ Error: npm not found. Please install Node.js and npm.")
+        print("💡 Try: https://nodejs.org/")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

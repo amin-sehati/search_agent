@@ -12,9 +12,10 @@ export async function POST(request: NextRequest) {
   try {
     console.log(`📖 [${requestId}] Parsing request body...`)
     const body = await request.json()
-    const { query } = body
+    const { query, user_companies = [] } = body
     
     console.log(`🔍 [${requestId}] Query received: "${query}"`)
+    console.log(`👤 [${requestId}] User companies: ${user_companies.length}`)
     console.log(`📊 [${requestId}] Request body size: ${JSON.stringify(body).length} characters`)
 
     if (!query) {
@@ -45,8 +46,10 @@ export async function POST(request: NextRequest) {
 
         // Run actual Python research system
         const pythonScript = path.join(process.cwd(), 'research_system.py')
+        const dataPayload = JSON.stringify({ query, user_companies })
         console.log(`🐍 [${requestId}] Python script path: ${pythonScript}`)
-        console.log(`🔧 [${requestId}] Spawning Python process with args: ['python3', '${pythonScript}', '${query}']`)
+        console.log(`🔧 [${requestId}] Spawning Python process`)
+        console.log(`📊 [${requestId}] Data payload size: ${dataPayload.length} characters`)
         
         const pythonProcess = spawn('python3', [pythonScript, query], {
           env: { ...process.env },

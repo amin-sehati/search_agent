@@ -12,19 +12,14 @@ load_dotenv()
 class Config:
     """Configuration class for the research system"""
 
-    # API Keys - Multiple fallback methods for Vercel compatibility
-    @classmethod
-    def _get_env_var(cls, var_name: str) -> str:
-        """Get environment variable with multiple fallback methods for Vercel"""
-        return (
-            os.environ.get(var_name) or 
-            os.getenv(var_name) or 
-            ""
-        )
-    
-    TAVILY_API_KEY = _get_env_var.__func__(None, "TAVILY_API_KEY")
-    FIRECRAWL_API_KEY = _get_env_var.__func__(None, "FIRECRAWL_API_KEY") 
-    OPENAI_API_KEY = _get_env_var.__func__(None, "OPENAI_API_KEY")
+    # API Keys - Direct environment variable access
+    TAVILY_API_KEY = os.environ["TAVILY_API_KEY"]
+    FIRECRAWL_API_KEY = os.environ["FIRECRAWL_API_KEY"]
+    OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+    CEREBRAS_API_KEY = os.environ["CEREBRAS_API_KEY"]
+
+    # Application Authentication
+    APP_PASSWORD = os.environ["APP_PASSWORD"]
 
     # LangChain Configuration
     LANGCHAIN_API_KEY = os.getenv("LANGCHAIN_API_KEY")
@@ -33,11 +28,10 @@ class Config:
 
     # Research Configuration
     MAX_SOURCES = 20
-    DEFAULT_MODEL = "gpt-4o"
-    FALLBACK_MODEL = "gpt-4o"
+    DEFAULT_MODEL = "llama-4-maverick-17b-128e-instruct"
 
     # Search Configuration
-    SEARCH_TIMEOUT = 30  # seconds
+    SEARCH_TIMEOUT = 60  # seconds (increased from 30)
     MAX_RETRIES = 3
 
     # Report Configuration
@@ -49,13 +43,13 @@ class Config:
         "search_depth": "advanced",
         "include_answer": True,
         "include_raw_content": True,
-        "max_results": 10,
+        "max_results": 5,
     }
 
     # Firecrawl Configuration
     FIRECRAWL_CONFIG = {
         "page_options": {"onlyMainContent": True, "includeHtml": False},
-        "limit": 10,
+        "limit": 5,
     }
 
     @classmethod
@@ -72,6 +66,9 @@ class Config:
 
         if not cls.OPENAI_API_KEY:
             issues.append("OpenAI API key not configured")
+
+        if not cls.APP_PASSWORD:
+            issues.append("Application password not configured")
 
         # LangChain keys are optional for tracing
         if cls.LANGCHAIN_TRACING_V2 == "true" and not cls.LANGCHAIN_API_KEY:

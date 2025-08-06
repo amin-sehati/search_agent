@@ -14,7 +14,7 @@ A Next.js web application for conducting comprehensive research using AI agents,
 ## Architecture
 
 - **Frontend**: Next.js 14 with TypeScript and Tailwind CSS
-- **Backend**: FastAPI with async research workflow
+- **Backend**: Next.js API Routes with direct Python integration
 - **AI Framework**: LangGraph for orchestrating research agents
 - **Data Sources**: Tavily (web search) and Firecrawl (content extraction)
 
@@ -47,16 +47,12 @@ A Next.js web application for conducting comprehensive research using AI agents,
    # Edit .env with your API keys
    ```
 
-3. **Start Development Servers**:
+3. **Start Development Server**:
    ```bash
-   # Option 1: Run both servers with one command
+   # Option 1: Use the helper script
    python dev.py
    
-   # Option 2: Run separately in different terminals
-   # Terminal 1: Start FastAPI backend  
-   cd api && python main.py
-   
-   # Terminal 2: Start Next.js frontend
+   # Option 2: Start directly
    npm run dev
    ```
 
@@ -95,16 +91,17 @@ Total package size optimized for Vercel deployment (< 200MB):
 - Lucide React (icons)
 
 **Backend** (~120MB):
-- FastAPI
+- Next.js API Routes
+- Python research system
 - LangGraph
-- OpenAI client
+- Cerebras (LLaMA-4)
 - Async HTTP libraries
 
 ## Configuration
 
 The application requires three API keys:
 
-- **OpenAI**: For GPT-4 analysis and report generation
+- **Cerebras**: For LLaMA-4 analysis and report generation
 - **Tavily**: For web search capabilities
 - **Firecrawl**: For content extraction and scraping
 
