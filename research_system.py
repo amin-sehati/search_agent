@@ -43,6 +43,7 @@ COMPANY_BOILERPLATE_PER_SOURCE = 500
 TAVILY_SUMMARY_MAX_LENGTH = 4000
 FIRECRAWL_SUMMARY_MAX_LENGTH = 4000
 SUMMARY_CHUNK_SIZE = 2000
+API_CALL_DELAY = 5  # Seconds between API calls to prevent rate limiting
 
 
 logging.basicConfig(level=logging.INFO)
@@ -187,6 +188,7 @@ class UserInputAgent:
             [HumanMessage(content=market_extraction_prompt)]
         )
         market_topic = response.content.strip()
+        await asyncio.sleep(API_CALL_DELAY)  # Rate limiting delay
         self.stream_progress(
             "Market Topic Extraction", f"Market topic identified: {market_topic}", 10
         )
@@ -338,6 +340,7 @@ class TavilySummarizer:
 
         response = await self.llm.ainvoke([HumanMessage(content=prompt)])
         summary_content = response.content.strip()
+        await asyncio.sleep(API_CALL_DELAY)  # Rate limiting delay
 
         return SearchResult(
             title=f"Tavily Search Summary: {market_topic} Market Analysis",
@@ -405,6 +408,7 @@ class FirecrawlSummarizer:
 
         response = await self.llm.ainvoke([HumanMessage(content=prompt)])
         summary_content = response.content.strip()
+        await asyncio.sleep(API_CALL_DELAY)  # Rate limiting delay
 
         return SearchResult(
             title=f"Firecrawl Search Summary: {market_topic} Market Deep Dive",
@@ -449,6 +453,7 @@ class LLMKnowledgeAgent:
 
         response = await self.llm.ainvoke([HumanMessage(content=prompt)])
         llm_content = response.content
+        await asyncio.sleep(API_CALL_DELAY)  # Rate limiting delay
 
         # Convert LLM response into SearchResult format for consistency
         results = [
@@ -927,6 +932,7 @@ class CompanyListSynthesizer:
         company_list_response = await structured_llm.ainvoke(
             [HumanMessage(content=prompt)]
         )
+        await asyncio.sleep(API_CALL_DELAY)  # Rate limiting delay
 
         return company_list_response.companies
 
@@ -958,6 +964,9 @@ class FinalCompanySynthesizer:
             )
             sources = detailed_info[company.name]
             page_content = await self._create_company_page(company, sources)
+            await asyncio.sleep(
+                API_CALL_DELAY
+            )  # Rate limiting delay between company profiles
             return company.name, page_content
 
         for i in range(0, total_companies, batch_size):
