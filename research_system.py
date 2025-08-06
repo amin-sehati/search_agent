@@ -34,8 +34,8 @@ CUSTOM_COMPANY_TAVILY_RESULTS = 2
 CUSTOM_COMPANY_FIRECRAWL_RESULTS = 2
 BATCH_SIZE = 4
 MAX_COMPANY_EXTRACT_CONTENT_LENGTH = 1000
-PROFILE_MAX_SOURCES = 5
-PROFILE_MAX_CONTENT_LENGTH = 12000
+PROFILE_MAX_SOURCES = 10
+PROFILE_MAX_CONTENT_LENGTH = 24000
 CUSTOM_COMPANY_CONTENT_SUMMARY_LENGTH = 10000
 COMPANY_EXTRACT_SOURCE_CONTENT_LENGTH = 10000
 COMPANY_EXTRACT_CONTENT_LENGTH = 8000
@@ -227,7 +227,6 @@ class TavilyCompanyDiscoveryAgent:
             15,
         )
 
-
         return {
             "company_discovery_tavily": all_results,
             "messages": [
@@ -272,7 +271,6 @@ class FirecrawlCompanyDiscoveryAgent:
             30,
         )
 
-
         return {
             "company_discovery_firecrawl": all_results,
             "messages": [
@@ -288,14 +286,16 @@ class TavilySummarizer:
         self.llm = llm
         self.stream_progress = stream_progress_callback
 
-    async def summarize_results(self, tavily_results: List[SearchResult], market_topic: str) -> SearchResult:
+    async def summarize_results(
+        self, tavily_results: List[SearchResult], market_topic: str
+    ) -> SearchResult:
         if not tavily_results:
             return SearchResult(
                 title="No Tavily Results",
                 url="internal://no-results",
                 description="No Tavily search results available",
                 content="",
-                source="tavily_summary"
+                source="tavily_summary",
             )
 
         self.stream_progress(
@@ -312,7 +312,10 @@ class TavilySummarizer:
 
         # Truncate if too long
         if len(combined_content) > TAVILY_SUMMARY_MAX_LENGTH * 2:
-            combined_content = combined_content[:TAVILY_SUMMARY_MAX_LENGTH * 2] + "\n\n[Content truncated due to length]"
+            combined_content = (
+                combined_content[: TAVILY_SUMMARY_MAX_LENGTH * 2]
+                + "\n\n[Content truncated due to length]"
+            )
 
         prompt = f"""
         Analyze and summarize the following Tavily search results for the {market_topic} market.
@@ -341,7 +344,7 @@ class TavilySummarizer:
             url="internal://tavily-summary",
             description=f"AI-generated summary of {len(tavily_results)} Tavily search results for {market_topic}",
             content=summary_content,
-            source="tavily_summary"
+            source="tavily_summary",
         )
 
 
@@ -350,14 +353,16 @@ class FirecrawlSummarizer:
         self.llm = llm
         self.stream_progress = stream_progress_callback
 
-    async def summarize_results(self, firecrawl_results: List[SearchResult], market_topic: str) -> SearchResult:
+    async def summarize_results(
+        self, firecrawl_results: List[SearchResult], market_topic: str
+    ) -> SearchResult:
         if not firecrawl_results:
             return SearchResult(
                 title="No Firecrawl Results",
-                url="internal://no-results", 
+                url="internal://no-results",
                 description="No Firecrawl search results available",
                 content="",
-                source="firecrawl_summary"
+                source="firecrawl_summary",
             )
 
         self.stream_progress(
@@ -374,7 +379,10 @@ class FirecrawlSummarizer:
 
         # Truncate if too long
         if len(combined_content) > FIRECRAWL_SUMMARY_MAX_LENGTH * 2:
-            combined_content = combined_content[:FIRECRAWL_SUMMARY_MAX_LENGTH * 2] + "\n\n[Content truncated due to length]"
+            combined_content = (
+                combined_content[: FIRECRAWL_SUMMARY_MAX_LENGTH * 2]
+                + "\n\n[Content truncated due to length]"
+            )
 
         prompt = f"""
         Analyze and summarize the following Firecrawl search results for the {market_topic} market.
@@ -403,7 +411,7 @@ class FirecrawlSummarizer:
             url="internal://firecrawl-summary",
             description=f"AI-generated summary of {len(firecrawl_results)} Firecrawl search results for {market_topic}",
             content=summary_content,
-            source="firecrawl_summary"
+            source="firecrawl_summary",
         )
 
 
@@ -458,7 +466,6 @@ class LLMKnowledgeAgent:
             f"LLM provided comprehensive company profiles for {market_topic} market.",
             22,
         )
-
 
         return {
             "company_discovery_llm": results,
@@ -648,20 +655,28 @@ class CompanyListSynthesizer:
         user_added_companies = state["user_added_companies"]
 
         # Create summarized versions of the raw search results
-        tavily_summary = await self.tavily_summarizer.summarize_results(tavily_results, market_topic)
-        firecrawl_summary = await self.firecrawl_summarizer.summarize_results(firecrawl_results, market_topic)
+        tavily_summary = await self.tavily_summarizer.summarize_results(
+            tavily_results, market_topic
+        )
+        firecrawl_summary = await self.firecrawl_summarizer.summarize_results(
+            firecrawl_results, market_topic
+        )
 
         # Combine summaries with LLM knowledge for synthesis
         summarized_sources = [tavily_summary, firecrawl_summary] + llm_results
-        all_sources = tavily_results + firecrawl_results + llm_results  # Keep original sources for streaming
-        
+        all_sources = (
+            tavily_results + firecrawl_results + llm_results
+        )  # Keep original sources for streaming
+
         self.stream_progress(
             "Company Synthesis",
             f"Created summaries from {len(all_sources)} sources. Using {len(summarized_sources)} summarized sources for analysis.",
             40,
         )
 
-        discovered_companies = await self._extract_companies(market_topic, summarized_sources)
+        discovered_companies = await self._extract_companies(
+            market_topic, summarized_sources
+        )
         self.stream_progress(
             "Company Synthesis",
             f"Extracted {len(discovered_companies)} companies from sources.",
@@ -682,10 +697,11 @@ class CompanyListSynthesizer:
                     "history": company.history,
                     "future_roadmap": company.future_roadmap or "",
                     "index": i + 1,
-                    "total": len(discovered_companies)
-                }
+                    "total": len(discovered_companies),
+                },
             }
             import json
+
             print(json.dumps(company_event))
 
         # After company synthesis, stream the raw source content
@@ -694,7 +710,7 @@ class CompanyListSynthesizer:
             "Streaming raw research sources...",
             50,
         )
-        
+
         # Stream Tavily content
         for i, result in enumerate(tavily_results):
             content_event = {
@@ -707,12 +723,12 @@ class CompanyListSynthesizer:
                     "description": result.description,
                     "content": result.content,
                     "index": i + 1,
-                    "total": len(tavily_results)
-                }
+                    "total": len(tavily_results),
+                },
             }
             print(json.dumps(content_event))
 
-        # Stream Firecrawl content  
+        # Stream Firecrawl content
         for i, result in enumerate(firecrawl_results):
             content_event = {
                 "type": "source_content",
@@ -724,8 +740,8 @@ class CompanyListSynthesizer:
                     "description": result.description,
                     "content": result.content,
                     "index": i + 1,
-                    "total": len(firecrawl_results)
-                }
+                    "total": len(firecrawl_results),
+                },
             }
             print(json.dumps(content_event))
 
@@ -741,8 +757,8 @@ class CompanyListSynthesizer:
                     "description": result.description,
                     "content": result.content,
                     "index": i + 1,
-                    "total": len(llm_results)
-                }
+                    "total": len(llm_results),
+                },
             }
             print(json.dumps(content_event))
 
@@ -757,13 +773,13 @@ class CompanyListSynthesizer:
                 "description": tavily_summary.description,
                 "content": tavily_summary.content,
                 "index": 1,
-                "total": 1
-            }
+                "total": 1,
+            },
         }
         print(json.dumps(summary_event))
 
         summary_event = {
-            "type": "source_content", 
+            "type": "source_content",
             "data": {
                 "timestamp": datetime.now().isoformat(),
                 "source": "firecrawl_summary",
@@ -772,8 +788,8 @@ class CompanyListSynthesizer:
                 "description": firecrawl_summary.description,
                 "content": firecrawl_summary.content,
                 "index": 1,
-                "total": 1
-            }
+                "total": 1,
+            },
         }
         print(json.dumps(summary_event))
         all_companies = discovered_companies + user_added_companies
@@ -799,18 +815,36 @@ class CompanyListSynthesizer:
             # Associate relevant sources with each company
             company_sources = []
             company_name_lower = company.name.lower()
+            company_words = company_name_lower.split()
 
-            for source in all_sources:
-                # Check for company name in content, title, or description
+            # First, add summarized sources (they contain concentrated info)
+            for source in summarized_sources:
                 source_text = f"{source.content.lower()} {source.title.lower()} {source.description.lower()}"
                 if company_name_lower in source_text or any(
-                    word in source_text for word in company_name_lower.split()
+                    word in source_text for word in company_words if len(word) > 2
                 ):
                     company_sources.append(source)
 
-            # Require direct matches - no fallback sources
+            # Then add relevant original sources
+            for source in all_sources:
+                if source in summarized_sources:
+                    continue  # Skip duplicates
+
+                source_text = f"{source.content.lower()} {source.title.lower()} {source.description.lower()}"
+                if company_name_lower in source_text or any(
+                    word in source_text for word in company_words if len(word) > 2
+                ):
+                    company_sources.append(source)
+
+            # If still no sources, use broader matching
             if not company_sources:
-                logger.warning(f"No sources found for company: {company.name}")
+                logger.warning(
+                    f"No direct sources found for company: {company.name}, trying broader matching..."
+                )
+                # Use all sources as fallback for broader analysis
+                company_sources = (
+                    summarized_sources + all_sources[:3]
+                )  # Limit fallback sources
 
             detailed_company_info[company.name] = company_sources
 
@@ -989,31 +1023,60 @@ class FinalCompanySynthesizer:
 
         combined_content = "".join(content_chunks)
         prompt = f"""
-        Generate a detailed company profile in Markdown format for "{company.name}".
+        Generate a comprehensive company profile in Markdown format for "{company.name}".
+        
         Company Name: {company.name}
         Initial Description: {company.description}
+        Company Status: {"Active" if company.still_in_business else "Inactive"}
+        Year Established: {company.year_established}
+        Market Relevance: {company.reasoning}
+        
         Collected Research Data:
         ---
         {combined_content}
         ---
+        
         Instructions:
-        1. Create the profile using the following Markdown structure.
-        2. Synthesize detailed information from the "Collected Research Data" to fill in each section.
-        3. If there is not enough information for a section based *only* on the provided data, write "Information not available from the provided sources." Do not invent information.
-        4. The "Sources" section should be a bulleted list of the URLs of the most relevant sources used.
+        1. Create a detailed profile using the following Markdown structure.
+        2. Extract and synthesize ALL relevant information from the "Collected Research Data" to create comprehensive sections.
+        3. Provide detailed, substantive content for each section based on the research data.
+        4. Include specific details like numbers, dates, locations, products, services, funding, leadership, etc.
+        5. If information is not available for a section, write "Information not available from the provided sources."
+        6. Do NOT invent information - only use what's provided in the research data.
+        7. Make each section as detailed and informative as possible using the available data.
 
         Required Markdown Structure:
         # {company.name}
-        ## Overview
-        [Provide a detailed company overview.]
-        ## Business Status
-        [Is the company still in business? Mention its current operational status.]
-        ## Market Position & Key Offerings
-        [Describe the company's position in its market and its key products/services.]
-        ## Key Facts & History
-        [Include key facts like year established, founders, headquarters, and a brief history.]
+        
+        ## Company Overview
+        [Provide a comprehensive overview including business model, main activities, target market, and overall company description. Include headquarters location, company size, and organizational structure if available.]
+        
+        ## Business Status & Operations
+        [Detail current operational status, business health, recent performance, and operational scope. Include information about markets served, geographical presence, and business scale.]
+        
+        ## Products & Services
+        [Describe in detail the company's offerings, product lines, services, technology platforms, and key features. Include pricing models, target customers, and competitive advantages.]
+        
+        ## Market Position & Strategy
+        [Explain the company's position in its market, competitive landscape, market share, strategic initiatives, partnerships, and business strategy.]
+        
+        ## Financial Information & Funding
+        [Include revenue figures, funding rounds, investor information, valuation, financial performance, and business metrics if available.]
+        
+        ## Leadership & Team
+        [Detail key executives, founders, leadership team, company culture, and organizational information.]
+        
+        ## Company History & Milestones
+        [Provide chronological history including founding story, major milestones, acquisitions, expansions, pivot points, and significant developments.]
+        
+        ## Recent Developments & News
+        [Include latest news, recent announcements, product launches, strategic moves, and current initiatives.]
+        
+        ## Future Plans & Roadmap
+        [Detail future plans, strategic roadmap, upcoming products, expansion plans, and growth strategies if available.]
+        
         ## Sources
-        [List the most relevant source URLs here as a bulleted list.]
+        [List all source URLs used as bulleted list.]
         """
 
         response = await self.llm.ainvoke([HumanMessage(content=prompt)])
@@ -1026,7 +1089,7 @@ class CompanyResearcher:
         cerebras_api_key: str,
         tavily_api_key: str,
         firecrawl_api_key: str,
-        model: str = "llama-4-maverick-17b-128e-instruct",
+        model: str = "gpt-oss-120b",
     ):
         self.llm = ChatCerebras(model=model, temperature=0)
         self.tavily_retriever = TavilyRetriever(tavily_api_key)

@@ -36,7 +36,7 @@ FIRECRAWL_API_KEY=your_firecrawl_api_key_here
 **Application Configuration:**
 ```
 AUTH_PASSWORD=your_secure_password_here
-DEFAULT_MODEL=llama-4-maverick-17b-128e-instruct
+DEFAULT_MODEL=gpt-oss-120b
 NODE_ENV=production
 PYTHONUNBUFFERED=1
 ```

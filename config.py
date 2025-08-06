@@ -28,7 +28,7 @@ class Config:
 
     # Research Configuration
     MAX_SOURCES = 20
-    DEFAULT_MODEL = "llama-4-maverick-17b-128e-instruct"
+    DEFAULT_MODEL = "gpt-oss-120bt"
 
     # Search Configuration
     SEARCH_TIMEOUT = 60  # seconds (increased from 30)
