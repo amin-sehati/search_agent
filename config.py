@@ -28,7 +28,7 @@ class Config:
 
     # Research Configuration
     MAX_SOURCES = 20
-    DEFAULT_MODEL = "qwen-3-235b-a22b-instruct-2507t"
+    DEFAULT_MODEL = "qwen-3-235b-a22b-instruct-2507"
 
     # Search Configuration
     SEARCH_TIMEOUT = 60  # seconds (increased from 30)

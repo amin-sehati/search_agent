@@ -1089,7 +1089,7 @@ class CompanyResearcher:
         cerebras_api_key: str,
         tavily_api_key: str,
         firecrawl_api_key: str,
-        model: str = "gpt-oss-120b",
+        model: str = "qwen-3-235b-a22b-instruct-2507",
     ):
         self.llm = ChatCerebras(model=model, temperature=0)
         self.tavily_retriever = TavilyRetriever(tavily_api_key)
