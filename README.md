@@ -32,7 +32,7 @@ A Next.js web application for conducting comprehensive research using AI agents,
    - `TAVILY_API_KEY`: Your Tavily API key  
    - `FIRECRAWL_API_KEY`: Your Firecrawl API key
    - `AUTH_PASSWORD`: Your login password
-   - `DEFAULT_MODEL`: gpt-oss-120b
+   - `DEFAULT_MODEL`: qwen-3-235b-a22b-instruct-2507
 4. **Deploy**: Railway will automatically build and deploy using the `railway.toml` and `nixpacks.toml` configuration
 
 ### Vercel (Alternative)

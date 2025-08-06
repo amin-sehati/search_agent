@@ -36,7 +36,7 @@ FIRECRAWL_API_KEY=your_firecrawl_api_key_here
 **Application Configuration:**
 ```
 AUTH_PASSWORD=your_secure_password_here
-DEFAULT_MODEL=gpt-oss-120b
+DEFAULT_MODEL=qwen-3-235b-a22b-instruct-2507
 NODE_ENV=production
 PYTHONUNBUFFERED=1
 ```
