@@ -4,10 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build && pip install -r requirements.txt",
+    "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "postinstall": "pip install -r requirements.txt || echo 'Python dependencies installation skipped'"
+    "lint": "next lint"
   },
   "dependencies": {
     "next": "14.0.4",
