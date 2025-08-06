@@ -1,0 +1,27 @@
+# nixpacks.toml - Configuration for Railway deployment
+[providers]
+# Enable both Node.js and Python providers
+node = true
+python = true
+
+[variables]
+# Node.js version
+NODE_VERSION = "18"
+# Python version  
+PYTHON_VERSION = "3.11"
+
+[phases.setup]
+# Install system dependencies if needed
+nixPkgs = ["python311", "python311Packages.pip"]
+
+[phases.install]
+# Install Node.js dependencies
+cmd = "npm ci"
+
+[phases.build]
+# Build the Next.js application
+cmd = "npm run build"
+
+[start]
+# Start the application
+cmd = "npm start"

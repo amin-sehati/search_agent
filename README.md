@@ -20,14 +20,30 @@ A Next.js web application for conducting comprehensive research using AI agents,
 
 ## Deployment
 
-### Vercel (Recommended)
+### Railway (Recommended)
+
+1. **Fork/Clone** this repository
+2. **Connect to Railway**: 
+   - Go to [railway.app](https://railway.app)
+   - Click "Deploy from GitHub repo"
+   - Select your forked repository
+3. **Set Environment Variables** in Railway dashboard:
+   - `CEREBRAS_API_KEY`: Your Cerebras API key
+   - `TAVILY_API_KEY`: Your Tavily API key  
+   - `FIRECRAWL_API_KEY`: Your Firecrawl API key
+   - `AUTH_PASSWORD`: Your login password
+   - `DEFAULT_MODEL`: llama-4-maverick-17b-128e-instruct
+4. **Deploy**: Railway will automatically build and deploy using the `railway.toml` and `nixpacks.toml` configuration
+
+### Vercel (Alternative)
 
 1. **Fork/Clone** this repository
 2. **Connect to Vercel**: Import your repository to Vercel
 3. **Set Environment Variables** in Vercel dashboard:
-   - `OPENAI_API_KEY`: Your OpenAI API key
+   - `CEREBRAS_API_KEY`: Your Cerebras API key
    - `TAVILY_API_KEY`: Your Tavily API key  
    - `FIRECRAWL_API_KEY`: Your Firecrawl API key
+   - `AUTH_PASSWORD`: Your login password
 4. **Deploy**: Vercel will automatically build and deploy
 
 ### Local Development
