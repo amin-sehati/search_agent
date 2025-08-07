@@ -1,11 +1,7 @@
 import asyncio
 import json
 import logging
-import os
-import sys
 import argparse
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Annotated, TypedDict
 from datetime import datetime
 from dotenv import load_dotenv
@@ -13,10 +9,9 @@ from pydantic import BaseModel, Field, field_validator
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.message import add_messages
-from langgraph.types import interrupt, Command
 
 # from langchain_openai import ChatOpenAI
-from langchain_cerebras import ChatCerebras
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.schema import HumanMessage, AIMessage
 from tavily import TavilyClient
 from firecrawl import AsyncFirecrawlApp, ScrapeOptions
@@ -33,17 +28,17 @@ DETAIL_FIRECRAWL_RESULTS = 10
 CUSTOM_COMPANY_TAVILY_RESULTS = 10
 CUSTOM_COMPANY_FIRECRAWL_RESULTS = 10
 BATCH_SIZE = 4
-MAX_COMPANY_EXTRACT_CONTENT_LENGTH = 1000
+MAX_COMPANY_EXTRACT_CONTENT_LENGTH = 100000
 PROFILE_MAX_SOURCES = 10
-PROFILE_MAX_CONTENT_LENGTH = 10000
-CUSTOM_COMPANY_CONTENT_SUMMARY_LENGTH = 5000
-COMPANY_EXTRACT_SOURCE_CONTENT_LENGTH = 5000
-COMPANY_EXTRACT_CONTENT_LENGTH = 5000
-COMPANY_BOILERPLATE_PER_SOURCE = 500
-TAVILY_SUMMARY_MAX_LENGTH = 2000
-FIRECRAWL_SUMMARY_MAX_LENGTH = 2000
-SUMMARY_CHUNK_SIZE = 2000
-API_CALL_DELAY = 20  # Seconds between API calls to prevent rate limiting
+PROFILE_MAX_CONTENT_LENGTH = 100000
+CUSTOM_COMPANY_CONTENT_SUMMARY_LENGTH = 100000
+COMPANY_EXTRACT_SOURCE_CONTENT_LENGTH = 100000
+COMPANY_EXTRACT_CONTENT_LENGTH = 100000
+COMPANY_BOILERPLATE_PER_SOURCE = 100000
+TAVILY_SUMMARY_MAX_LENGTH = 100000
+FIRECRAWL_SUMMARY_MAX_LENGTH = 100000
+SUMMARY_CHUNK_SIZE = 100000
+API_CALL_DELAY = 1  # Seconds between API calls to prevent rate limiting
 
 
 logging.basicConfig(level=logging.INFO)
@@ -169,7 +164,7 @@ class FirecrawlRetriever:
 
 
 class UserInputAgent:
-    def __init__(self, llm: ChatCerebras, stream_progress_callback):
+    def __init__(self, llm: ChatGoogleGenerativeAI, stream_progress_callback):
         self.llm = llm
         self.stream_progress = stream_progress_callback
 
@@ -181,8 +176,11 @@ class UserInputAgent:
         )
         query = state["original_query"]
         market_extraction_prompt = f"""Based on the user's query: "{query}" which sets the market for the research, write a short description of the market concisely and
-        precisely that would help the search agents to find companies in the market. Formulat your answer as a query that would be asked to the search agents to 
-        find companies in the market. Answer with the query only, no other text. (answer in less than 200 characters)"""
+        precisely that would help the search agents to find companies in the market. 
+        
+        Format your response as: [{query}] followed by your refined search query.
+        
+        The refined query should be optimized for search agents to find companies in this market. Keep the total response under 250 characters."""
 
         response = await self.llm.ainvoke(
             [HumanMessage(content=market_extraction_prompt)]
@@ -202,7 +200,10 @@ class UserInputAgent:
 
 class TavilyCompanyDiscoveryAgent:
     def __init__(
-        self, retriever: TavilyRetriever, llm: ChatCerebras, stream_progress_callback
+        self,
+        retriever: TavilyRetriever,
+        llm: ChatGoogleGenerativeAI,
+        stream_progress_callback,
     ):
         self.retriever = retriever
         self.llm = llm
@@ -241,7 +242,10 @@ class TavilyCompanyDiscoveryAgent:
 
 class FirecrawlCompanyDiscoveryAgent:
     def __init__(
-        self, retriever: FirecrawlRetriever, llm: ChatCerebras, stream_progress_callback
+        self,
+        retriever: FirecrawlRetriever,
+        llm: ChatGoogleGenerativeAI,
+        stream_progress_callback,
     ):
         self.retriever = retriever
         self.llm = llm
@@ -284,7 +288,7 @@ class FirecrawlCompanyDiscoveryAgent:
 
 
 class TavilySummarizer:
-    def __init__(self, llm: ChatCerebras, stream_progress_callback):
+    def __init__(self, llm: ChatGoogleGenerativeAI, stream_progress_callback):
         self.llm = llm
         self.stream_progress = stream_progress_callback
 
@@ -352,7 +356,7 @@ class TavilySummarizer:
 
 
 class FirecrawlSummarizer:
-    def __init__(self, llm: ChatCerebras, stream_progress_callback):
+    def __init__(self, llm: ChatGoogleGenerativeAI, stream_progress_callback):
         self.llm = llm
         self.stream_progress = stream_progress_callback
 
@@ -420,7 +424,7 @@ class FirecrawlSummarizer:
 
 
 class LLMKnowledgeAgent:
-    def __init__(self, llm: ChatCerebras, stream_progress_callback):
+    def __init__(self, llm: ChatGoogleGenerativeAI, stream_progress_callback):
         self.llm = llm
         self.stream_progress = stream_progress_callback
 
@@ -487,7 +491,7 @@ class CustomCompanyResearchAgent:
         self,
         tavily_retriever: TavilyRetriever,
         firecrawl_retriever: FirecrawlRetriever,
-        llm: ChatCerebras,
+        llm: ChatGoogleGenerativeAI,
         stream_progress_callback,
     ):
         self.tavily_retriever = tavily_retriever
@@ -606,6 +610,8 @@ class CustomCompanyResearchAgent:
     ) -> Company:
         """Create a company profile from research sources"""
         content_summary = ""
+        for i, source in enumerate(sources):
+            content_summary += f"Source {i+1}: {source.title}\nURL: {source.url}\nContent: {source.content}\n\n---\n\n"
 
         # Use LLM to extract company information
         prompt = f"""
@@ -642,7 +648,7 @@ class CustomCompanyResearchAgent:
 
 
 class CompanyListSynthesizer:
-    def __init__(self, llm: ChatCerebras, stream_progress_callback):
+    def __init__(self, llm: ChatGoogleGenerativeAI, stream_progress_callback):
         self.llm = llm
         self.stream_progress = stream_progress_callback
         self.tavily_summarizer = TavilySummarizer(llm, stream_progress_callback)
@@ -706,9 +712,7 @@ class CompanyListSynthesizer:
                     "total": len(discovered_companies),
                 },
             }
-            import json
-
-            print(json.dumps(company_event))
+            print(json.dumps(company_event), flush=True)
 
         # After company synthesis, stream the raw source content
         self.stream_progress(
@@ -732,7 +736,7 @@ class CompanyListSynthesizer:
                     "total": len(tavily_results),
                 },
             }
-            print(json.dumps(content_event))
+            print(json.dumps(content_event), flush=True)
 
         # Stream Firecrawl content
         for i, result in enumerate(firecrawl_results):
@@ -749,7 +753,7 @@ class CompanyListSynthesizer:
                     "total": len(firecrawl_results),
                 },
             }
-            print(json.dumps(content_event))
+            print(json.dumps(content_event), flush=True)
 
         # Stream LLM content
         for i, result in enumerate(llm_results):
@@ -766,10 +770,10 @@ class CompanyListSynthesizer:
                     "total": len(llm_results),
                 },
             }
-            print(json.dumps(content_event))
+            print(json.dumps(content_event), flush=True)
 
         # Stream summary content
-        summary_event = {
+        tavily_summary_event = {
             "type": "source_content",
             "data": {
                 "timestamp": datetime.now().isoformat(),
@@ -782,9 +786,9 @@ class CompanyListSynthesizer:
                 "total": 1,
             },
         }
-        print(json.dumps(summary_event))
+        print(json.dumps(tavily_summary_event), flush=True)
 
-        summary_event = {
+        firecrawl_summary_event = {
             "type": "source_content",
             "data": {
                 "timestamp": datetime.now().isoformat(),
@@ -797,7 +801,7 @@ class CompanyListSynthesizer:
                 "total": 1,
             },
         }
-        print(json.dumps(summary_event))
+        print(json.dumps(firecrawl_summary_event), flush=True)
         all_companies = discovered_companies + user_added_companies
 
         unique_companies = list(
@@ -809,6 +813,16 @@ class CompanyListSynthesizer:
             self.stream_progress(
                 "Company Synthesis", "Failed to extract any companies.", 50
             )
+            error_event = {
+                "type": "error",
+                "error": "Failed to extract any companies from research data.",
+                "data": {
+                    "timestamp": datetime.now().isoformat(),
+                    "step": "Company Synthesis",
+                    "details": "No companies could be extracted from the available research sources.",
+                },
+            }
+            print(json.dumps(error_event), flush=True)
             raise Exception("Failed to extract any companies from research data.")
 
         self.stream_progress(
@@ -854,6 +868,31 @@ class CompanyListSynthesizer:
 
             detailed_company_info[company.name] = company_sources
 
+        # Send state event to frontend
+        state_event = {
+            "type": "state",
+            "data": {
+                "companies_list": [
+                    {
+                        "name": company.name,
+                        "description": company.description,
+                        "reasoning": company.reasoning,
+                        "year_established": company.year_established,
+                        "still_in_business": company.still_in_business,
+                        "history": company.history or "",
+                        "future_roadmap": company.future_roadmap or "",
+                    }
+                    for company in unique_companies
+                ],
+                "current_step": "final_synthesis",
+                "awaiting_user_input": False,
+                "market_topic": market_topic,
+                "total_companies": len(unique_companies),
+                "timestamp": datetime.now().isoformat(),
+            },
+        }
+        print(json.dumps(state_event), flush=True)
+
         return {
             "companies_list": unique_companies,
             "detailed_company_info": detailed_company_info,
@@ -877,31 +916,25 @@ class CompanyListSynthesizer:
         if not valid_sources:
             return []
 
-        num_sources = len(valid_sources)
-
-        # Estimate total boilerplate length to calculate available content length
-        boilerplate_per_source = COMPANY_BOILERPLATE_PER_SOURCE  # Approximate length of "Source: ...\nURL: ...\nContent: \n\n"
-        total_boilerplate_length = num_sources * boilerplate_per_source
-
-        available_content_length = (
-            COMPANY_EXTRACT_CONTENT_LENGTH - total_boilerplate_length
-        )
-        if available_content_length <= 0:
-            # If boilerplate is too long, just use titles and URLs
-            content_per_source = 0
-        else:
-            content_per_source = available_content_length // num_sources
-
         content_chunks = []
-        for s in valid_sources:
-            content_slice = s.content[:content_per_source]
-            chunk = f"Source: {s.title}\nURL: {s.url}\nContent: {content_slice}\n\n"
-            content_chunks.append(chunk)
+        total_length = 0
+        max_len = COMPANY_EXTRACT_CONTENT_LENGTH
 
-        # if not content_chunks:
-        #     raise Exception(
-        #         f"No content available to extract companies for market: {market_topic}"
-        #     )
+        for s in valid_sources:
+            header = f"Source: {s.title}\nURL: {s.url}\nContent: "
+            footer = "\n\n"
+
+            available_space = max_len - total_length - len(header) - len(footer)
+            if available_space <= 0:
+                break
+
+            content_slice = s.content[:available_space]
+            chunk = header + content_slice + footer
+            content_chunks.append(chunk)
+            total_length += len(chunk)
+
+        if not content_chunks:
+            return []
 
         combined_content = "".join(content_chunks)
         prompt = f"""
@@ -939,7 +972,7 @@ class CompanyListSynthesizer:
 
 
 class FinalCompanySynthesizer:
-    def __init__(self, llm: ChatCerebras, stream_progress_callback):
+    def __init__(self, llm: ChatGoogleGenerativeAI, stream_progress_callback):
         self.llm = llm
         self.stream_progress = stream_progress_callback
 
@@ -968,6 +1001,19 @@ class FinalCompanySynthesizer:
             await asyncio.sleep(
                 API_CALL_DELAY
             )  # Rate limiting delay between company profiles
+
+            # Stream individual company profile completion
+            profile_event = {
+                "type": "progress",
+                "data": {
+                    "timestamp": datetime.now().isoformat(),
+                    "step": "Final Synthesis",
+                    "message": f"✅ Completed profile for {company.name}",
+                    "progress": 60 + int(40 * ((index + 1) / total_companies)),
+                },
+            }
+            print(json.dumps(profile_event), flush=True)
+
             return company.name, page_content
 
         for i in range(0, total_companies, batch_size):
@@ -1027,6 +1073,18 @@ class FinalCompanySynthesizer:
                     break
 
         if not content_chunks:
+            error_event = {
+                "type": "error",
+                "error": f"No source content available to generate profile for: {company.name}",
+                "data": {
+                    "timestamp": datetime.now().isoformat(),
+                    "step": "Final Synthesis",
+                    "company_name": company.name,
+                    "total_sources": len(sources),
+                    "details": f"Unable to generate profile for {company.name} due to lack of source content.",
+                },
+            }
+            print(json.dumps(error_event), flush=True)
             raise Exception(
                 f"No source content available to generate profile for: {company.name}. Total sources: {len(sources)}"
             )
@@ -1097,12 +1155,12 @@ class FinalCompanySynthesizer:
 class CompanyResearcher:
     def __init__(
         self,
-        cerebras_api_key: str,
+        GOOGLE_API_KEY: str,
         tavily_api_key: str,
         firecrawl_api_key: str,
-        model: str = "qwen-3-235b-a22b-instruct-2507",
+        model: str = "gemini-2.5-flash",
     ):
-        self.llm = ChatCerebras(model=model, temperature=0)
+        self.llm = ChatGoogleGenerativeAI(model=model, temperature=0)
         self.tavily_retriever = TavilyRetriever(tavily_api_key)
         self.firecrawl_retriever = FirecrawlRetriever(firecrawl_api_key)
         self.user_input_agent = UserInputAgent(self.llm, self._stream_progress)
@@ -1140,7 +1198,7 @@ class CompanyResearcher:
                 "progress": progress,
             },
         }
-        print(json.dumps(event))
+        print(json.dumps(event), flush=True)
 
     def _build_workflow(self) -> StateGraph:
         workflow = StateGraph(CompanyResearchState)
@@ -1271,7 +1329,7 @@ async def main():
     from config import Config
 
     researcher = CompanyResearcher(
-        cerebras_api_key=Config.CEREBRAS_API_KEY,
+        GOOGLE_API_KEY=Config.GOOGLE_API_KEY,
         tavily_api_key=Config.TAVILY_API_KEY,
         firecrawl_api_key=Config.FIRECRAWL_API_KEY,
         model=Config.DEFAULT_MODEL,
@@ -1289,7 +1347,7 @@ async def main():
             "timestamp": datetime.now().isoformat(),
         },
     }
-    print(json.dumps(result, indent=2))
+    print(json.dumps(result), flush=True)
 
 
 if __name__ == "__main__":

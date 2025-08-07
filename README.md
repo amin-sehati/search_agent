@@ -28,11 +28,11 @@ A Next.js web application for conducting comprehensive research using AI agents,
    - Click "Deploy from GitHub repo"
    - Select your forked repository
 3. **Set Environment Variables** in Railway dashboard:
-   - `CEREBRAS_API_KEY`: Your Cerebras API key
+   - `GOOGLE_API_KEY`: Your Cerebras API key
    - `TAVILY_API_KEY`: Your Tavily API key  
    - `FIRECRAWL_API_KEY`: Your Firecrawl API key
    - `AUTH_PASSWORD`: Your login password
-   - `DEFAULT_MODEL`: qwen-3-235b-a22b-instruct-2507
+   - `DEFAULT_MODEL`: gemini-2.5-flash
 4. **Deploy**: Railway will automatically build and deploy using the `railway.toml` and `nixpacks.toml` configuration
 
 ### Vercel (Alternative)
@@ -40,7 +40,7 @@ A Next.js web application for conducting comprehensive research using AI agents,
 1. **Fork/Clone** this repository
 2. **Connect to Vercel**: Import your repository to Vercel
 3. **Set Environment Variables** in Vercel dashboard:
-   - `CEREBRAS_API_KEY`: Your Cerebras API key
+   - `GOOGLE_API_KEY`: Your Cerebras API key
    - `TAVILY_API_KEY`: Your Tavily API key  
    - `FIRECRAWL_API_KEY`: Your Firecrawl API key
    - `AUTH_PASSWORD`: Your login password

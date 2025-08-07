@@ -28,7 +28,7 @@ In your Railway project dashboard, go to **Variables** tab and add:
 
 **Required API Keys:**
 ```
-CEREBRAS_API_KEY=your_cerebras_api_key_here
+GOOGLE_API_KEY=your_GOOGLE_API_KEY_here
 TAVILY_API_KEY=your_tavily_api_key_here
 FIRECRAWL_API_KEY=your_firecrawl_api_key_here
 ```
@@ -36,7 +36,7 @@ FIRECRAWL_API_KEY=your_firecrawl_api_key_here
 **Application Configuration:**
 ```
 AUTH_PASSWORD=your_secure_password_here
-DEFAULT_MODEL=qwen-3-235b-a22b-instruct-2507
+DEFAULT_MODEL=gemini-2.5-flash
 NODE_ENV=production
 PYTHONUNBUFFERED=1
 ```
@@ -70,7 +70,7 @@ This repository includes the following Railway-specific files:
 1. Go to [Cerebras Cloud Platform](https://cloud.cerebras.ai/)
 2. Sign up for an account
 3. Generate an API key
-4. Add it as `CEREBRAS_API_KEY`
+4. Add it as `GOOGLE_API_KEY`
 
 ### Tavily API Key
 1. Go to [Tavily](https://tavily.com/)

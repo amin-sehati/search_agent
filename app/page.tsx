@@ -82,7 +82,7 @@ interface SourceContentData {
 }
 
 interface StreamEvent {
-  type: 'progress' | 'complete' | 'error' | 'company_discovery' | 'company_found' | 'source_content'
+  type: 'progress' | 'complete' | 'error' | 'company_found' | 'source_content' | 'state'
   data?: any
   error?: string
 }
@@ -224,20 +224,13 @@ export default function Home() {
               } else if (eventData.type === 'source_content' && eventData.data) {
                 const sourceData = eventData.data as SourceContentData
                 setSourceContents(prev => [...prev, sourceData])
-              } else if (eventData.type === 'company_discovery' && eventData.data) {
-                const discoveryData = eventData.data as CompanyDiscoveryResult
-                setCompanyDiscovery(discoveryData)
-                setCompanies(discoveryData.companies)
+              } else if (eventData.type === 'state' && eventData.data) {
                 setResearchState(eventData.data)
-                setProgress(100)
-                setCurrentStep('Company Search Complete')
-              } else if (eventData.type === 'complete' && eventData.data) {
-                console.log("🚀 ~ startResearch ~ eventData.data:", eventData.data)
-                if (eventData.data.company_pages) {
-                  setCompanyResult(eventData.data as CompanyResearchResult)
-                } else {
-                  setResult(eventData.data as ResearchResult)
+                if(eventData.data.companies_list) {
+                  setCompanies(eventData.data.companies_list)
                 }
+              } else if (eventData.type === 'complete' && eventData.data) {
+                setCompanyResult(eventData.data as CompanyResearchResult)
                 setProgress(100)
                 setCurrentStep('Complete')
               } else if (eventData.type === 'error') {
@@ -500,53 +493,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* User Added Companies Section */}
-      {companies.length > 0 && (
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 text-black">
-            👤 Your Companies ({companies.length})
-          </h2>
-          <p className="text-sm text-gray-600 mb-4">
-            These companies will be included in your research along with any discovered companies.
-          </p>
-          
-          <div className="space-y-4 mb-6">
-            {companies.map((company, index) => (
-              <div key={index} className="border border-gray-200 rounded-lg p-4">
-                <div className="flex justify-between items-start mb-2">
-                  <input
-                    type="text"
-                    value={company.name}
-                    onChange={(e) => updateCompany(index, 'name', e.target.value)}
-                    className="text-lg font-medium border-b border-gray-300 focus:border-blue-500 focus:outline-none bg-transparent text-gray-900"
-                    placeholder="Company Name"
-                  />
-                  <button
-                    onClick={() => removeCompany(index)}
-                    className="text-red-600 hover:text-red-800 text-sm"
-                  >
-                    Remove
-                  </button>
-                </div>
-                <textarea
-                  value={company.description}
-                  onChange={(e) => updateCompany(index, 'description', e.target.value)}
-                  className="w-full p-2 border border-gray-300 rounded focus:border-blue-500 focus:outline-none mb-2 text-gray-900"
-                  placeholder="Company Description"
-                  rows={2}
-                />
-                <textarea
-                  value={company.reasoning}
-                  onChange={(e) => updateCompany(index, 'reasoning', e.target.value)}
-                  className="w-full p-2 border border-gray-300 rounded focus:border-blue-500 focus:outline-none text-gray-900"
-                  placeholder="Why this company is relevant to the market"
-                  rows={2}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+
 
       {/* Progress Section */}
       {(isResearching || progressEvents.length > 0) && (

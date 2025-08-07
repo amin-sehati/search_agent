@@ -16,7 +16,7 @@ class Config:
     TAVILY_API_KEY = os.environ["TAVILY_API_KEY"]
     FIRECRAWL_API_KEY = os.environ["FIRECRAWL_API_KEY"]
     OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
-    CEREBRAS_API_KEY = os.environ["CEREBRAS_API_KEY"]
+    GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
 
     # Application Authentication
     APP_PASSWORD = os.environ["APP_PASSWORD"]
@@ -28,10 +28,10 @@ class Config:
 
     # Research Configuration
     MAX_SOURCES = 20
-    DEFAULT_MODEL = "qwen-3-235b-a22b-instruct-2507"
+    DEFAULT_MODEL = "gemini-2.5-flash"
 
     # Search Configuration
-    SEARCH_TIMEOUT = 60  # seconds (increased from 30)
+    SEARCH_TIMEOUT = 120  # seconds (increased from 30)
     MAX_RETRIES = 3
 
     # Report Configuration

@@ -1,6 +1,6 @@
 # AI libraries  
 langchain
-langchain-cerebras
+langchain-google-genai
 langgraph
 
 # Data validation and processing
