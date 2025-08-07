@@ -43,13 +43,13 @@ class Config:
         "search_depth": "advanced",
         "include_answer": True,
         "include_raw_content": True,
-        "max_results": 5,
+        "max_results": 10,
     }
 
     # Firecrawl Configuration
     FIRECRAWL_CONFIG = {
         "page_options": {"onlyMainContent": True, "includeHtml": False},
-        "limit": 5,
+        "limit": 10,
     }
 
     @classmethod

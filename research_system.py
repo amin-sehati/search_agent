@@ -24,14 +24,14 @@ from firecrawl import AsyncFirecrawlApp, ScrapeOptions
 load_dotenv()
 
 # Global configuration parameters
-TAVILY_DEFAULT_MAX_RESULTS = 3
-FIRECRAWL_DEFAULT_MAX_RESULTS = 3
-INITIAL_TAVILY_RESULTS = 3
-DETAIL_TAVILY_RESULTS = 2
-INITIAL_FIRECRAWL_RESULTS = 3
-DETAIL_FIRECRAWL_RESULTS = 2
-CUSTOM_COMPANY_TAVILY_RESULTS = 2
-CUSTOM_COMPANY_FIRECRAWL_RESULTS = 2
+TAVILY_DEFAULT_MAX_RESULTS = 10
+FIRECRAWL_DEFAULT_MAX_RESULTS = 10
+INITIAL_TAVILY_RESULTS = 10
+DETAIL_TAVILY_RESULTS = 10
+INITIAL_FIRECRAWL_RESULTS = 10
+DETAIL_FIRECRAWL_RESULTS = 10
+CUSTOM_COMPANY_TAVILY_RESULTS = 10
+CUSTOM_COMPANY_FIRECRAWL_RESULTS = 10
 BATCH_SIZE = 4
 MAX_COMPANY_EXTRACT_CONTENT_LENGTH = 1000
 PROFILE_MAX_SOURCES = 10
@@ -43,7 +43,7 @@ COMPANY_BOILERPLATE_PER_SOURCE = 500
 TAVILY_SUMMARY_MAX_LENGTH = 4000
 FIRECRAWL_SUMMARY_MAX_LENGTH = 4000
 SUMMARY_CHUNK_SIZE = 2000
-API_CALL_DELAY = 5  # Seconds between API calls to prevent rate limiting
+API_CALL_DELAY = 30  # Seconds between API calls to prevent rate limiting
 
 
 logging.basicConfig(level=logging.INFO)
@@ -636,6 +636,7 @@ class CustomCompanyResearchAgent:
 
         structured_llm = self.llm.with_structured_output(Company)
         company_profile = await structured_llm.ainvoke([HumanMessage(content=prompt)])
+        await asyncio.sleep(API_CALL_DELAY)  # Rate limiting delay
         company_profile.sources = sources
         return company_profile
 
@@ -1089,6 +1090,7 @@ class FinalCompanySynthesizer:
         """
 
         response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+        await asyncio.sleep(API_CALL_DELAY)  # Rate limiting delay
         return response.content.strip()
 
 
